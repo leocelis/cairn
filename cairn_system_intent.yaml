@@ -1,0 +1,639 @@
+# ==============================================================================
+# Cairn: Master Intent Artifact (System Charter)
+# ==============================================================================
+# Cairn — the agent-native retrieval engine.
+#
+# A cairn is a stack of stones left by those who passed before, marking the way
+# for those who come after. This engine is the same idea for AI agents: a
+# navigation layer of canonical entities and relations that marks the route to
+# context — built incrementally, consulted before every retrieval.
+#
+# Version: 0.2.1 (CHARTER — post-research: north star + market positioning + no-query-language principle + open questions)
+# Created: 2026-06-26 · Updated: 2026-06-27
+# Status: Draft charter, research phase complete (foundations + patterns + gap-fill done).
+#         Hardened through: research ✓ → patterns ✓ → use cases → tech spec →
+#         roadmap → refined intent (use-cases is the next phase of work).
+#
+# LICENSE / ATTRIBUTION
+#   License: MIT
+#   Copyright (c) 2026 Leo Celis — https://leocelis.com
+#   Built with and verified by IVD (Intent-Verified Development) — https://ivdframework.dev
+#   Cairn is a standalone open-source project in the IVD family of tools
+#   (IVD · Horizon · EIF). This artifact follows the IVD intent format.
+#
+# DESIGN NOTE (read first):
+#   This is a SYSTEM-LEVEL charter. It states the thesis, the gap, the design
+#   invariants, and the non-negotiable constraints — deliberately WITHOUT
+#   committing to a tech stack. Module/task intents (with fine-grained
+#   constraints, tests, and joint-satisfaction gates) are authored in the
+#   tech-spec phase. Per IVD Rule 4, the adversarial stress-test and the
+#   Rule 3b human review gate run BEFORE any implementation.
+# ==============================================================================
+
+scope:
+  level: "system"
+  type: "product"        # an open-source library/engine
+  granularity: "coarse"
+
+metadata:
+  feature_id: "cairn_engine"
+  category: "agent_infrastructure"
+  tags: ["retrieval", "ai-agents", "entity-resolution", "routing", "rag", "knowledge-graph", "local-first", "open-source"]
+  status: "planned"
+  introduced_version: "0.1.0"
+
+# ==============================================================================
+# INVERSION OPPORTUNITIES (Principle 8: Innovation through Inversion)
+# ==============================================================================
+# Cairn exists because three dominant beliefs about agent memory are wrong for
+# the agent use case. The inversions below ARE the product thesis.
+
+inversion_opportunities:
+  problem: "How should an autonomous AI agent retrieve the right context for a natural-language request over a large, interconnected corpus?"
+  dominant_belief: "Agents need a knowledge-graph database (Neo4j/FalkorDB) or a vector DB, populated by an LLM ingestion pipeline (e.g. Graphiti-style), queried as the memory system."
+  proposed_inversions:
+    - name: "Don't own the storage — route over whatever store already exists"
+      description: "Cairn is a routing/composition layer, not a database. It orchestrates retrieval against the user's existing stores (files, SQL, vector DB, graph DB), staying storage-agnostic."
+      rationale: "Existing engines (Graphiti, FalkorDB GraphRAG) couple memory to a specific DB and force migration. The durable value for agents is the decision + routing layer, not another storage engine. Decouple them."
+      status: "chosen"
+    - name: "Don't use an LLM to build or query the index — make resolution deterministic"
+      description: "Entity resolution uses canonical IDs + alias table + deterministic fuzzy matching (no LLM, no mandatory embeddings) on the hot path. LLM/embeddings are an optional last-tier fallback, never a requirement."
+      rationale: "LLM-heavy ingestion (3-6 calls/episode in Graphiti) is slow, costly, non-deterministic, and produces inconsistent graphs over time (the standing community critique). Determinism is cheaper, faster, reproducible, and auditable."
+      status: "chosen"
+    - name: "Don't load the index into the prompt — use it as a navigation layer"
+      description: "The entity/relation map is consulted to DECIDE what to fetch and to traverse relations; it is not dumped wholesale into the model context. The agent receives a small, assembled ContextPackage."
+      rationale: "Dumping a large index into the prompt is what makes naive approaches expensive and noisy. A map's job is to find the path, not to be the payload."
+      status: "chosen"
+    - name: "Don't always retrieve — decide whether to retrieve at all, first"
+      description: "An adaptive gate runs before any retrieval and may answer from the model's parametric knowledge, or pick exactly one signal (grep | semantic | graph) instead of fanning out to all."
+      rationale: "Blind retrieval wastes tokens and latency and can lower answer quality. The cheapest correct retrieval is often none. Routing precedes fetching."
+      status: "chosen"
+
+# ==============================================================================
+# INTENT
+# ==============================================================================
+
+intent:
+  summary: "Cairn is the deterministic world-model engine for AI super-agents: a storage-agnostic routing and composition layer that builds and navigates a trustworthy entity map — deciding whether to retrieve, resolving entities deterministically, traversing their relations, and assembling a minimal context package, with zero generative-LLM calls on the hot path."
+
+  north_star: |
+    The chain this project serves (GOAL → CAIRN):
+      Super Agent (a capable, autonomous agent over a user's life/work)
+        -> needs a world model it can TRUST (not one that hallucinates or drifts)
+          -> that world model IS a map of entities + relations + temporal state
+            -> which must be BUILT and NAVIGATED deterministically
+              -> that engine is Cairn.
+    The entity world is the substrate the agent reasons over; Cairn is the path
+    through it (a cairn marks the route — it is not the terrain). Trust is not a
+    feature here: for an autonomous agent, a world model it cannot trust is not
+    usable, so determinism IS the product.
+    Scope discipline: the goal is "Super Agent," deliberately NOT "AGI." Cairn is
+    the world-model substrate of a capable agent — not a claim about general
+    intelligence. The foundational subsystem is ENTITIES (Primitive B); the gate,
+    orchestration, and assembler exist to serve a trustworthy entity world.
+
+  goal: |
+    Today's retrieval infrastructure was built for problems other than the
+    autonomous-agent use case:
+      - Vector DBs were built for semantic document search.
+      - Graph DBs (Neo4j, FalkorDB) were built for enterprise graph workloads.
+      - LLM-memory engines (Graphiti/Zep, Mem0) were built as temporal memory
+        layers, coupled to a specific DB and an LLM ingestion pipeline.
+
+    None were designed around how an AGENT actually accesses context:
+      1. Detect the entities a request refers to.
+      2. Resolve aliases/nicknames to a canonical identity (deterministically).
+      3. Traverse that entity's relations to find what is connected.
+      4. Decide which retrieval signal (lexical grep, semantic, graph
+         traversal) — or none — actually answers the request.
+      5. Assemble the smallest sufficient context and hand it to the model.
+
+    Cairn provides exactly this missing layer — and nothing below it. It does
+    not store data; it routes over stores the user already has. It does not run
+    an LLM to ingest or query; resolution is deterministic and reproducible. It
+    does not dump an index into the prompt; the map is a navigation aid, not the
+    payload.
+
+    Three primitives:
+      A. ADAPTIVE RETRIEVAL GATE
+         Decide, before fetching, whether to retrieve and which signal to use.
+      B. ENTITY-FIRST ROUTING
+         mention detection -> deterministic alias resolution to canonical IDs
+         -> relation closure via graph traversal -> emit a ContextPackage.
+      C. SIGNAL ORCHESTRATION
+         Run the chosen signals (grep / semantic / graph) — composably and
+         storage-agnostically — and fuse results into one assembled context.
+
+    Design stance: deterministic, local-first, storage-agnostic, explicit
+    ontology (canonical IDs, not schema-free LLM extraction), and progressive
+    in scale (in-memory map for small corpora; pluggable backend for large).
+
+  success_metric: |
+    Charter-level definitions of success (quantitative targets are set in the
+    tech-spec phase against a public benchmark, not asserted here):
+
+    - CORRECTNESS: On a held-out agent-query benchmark, Cairn assembles context
+      that yields answer quality >= a strong baseline (agentic grep, and a
+      vector-RAG baseline), at materially lower token + latency cost.
+    - DETERMINISM: The same query against the same corpus yields the same
+      ContextPackage on repeated runs (byte-stable resolution + traversal).
+    - HOT-PATH PURITY: The default retrieve() path issues zero LLM/network
+      calls (measurable: mocked LLM/embeddings client receives zero calls).
+    - PORTABILITY: The engine core runs against >= 2 storage backends with no
+      core code change (only an adapter), proving storage-agnosticism.
+    - SCALE: The same public API serves a 100-entity in-memory corpus and a
+      100k+-entity backend-backed corpus.
+    - ADOPTABILITY: Clone -> install -> run the quickstart with no cloud account
+      and no API key required for the default (deterministic) path.
+
+  stakeholders:
+    - "AI agents that must retrieve context over large, interconnected corpora"
+    - "Engineers building agents who need retrieval without adopting a new database"
+    - "Privacy/local-first users who cannot send data to a cloud LLM for indexing"
+    - "Open-source contributors in the agent-infrastructure ecosystem"
+    - "Leo Celis (https://leocelis.com) — initial author and maintainer"
+
+# ==============================================================================
+# INTERFACE (charter sketch — hardened in the tech-spec phase)
+# ==============================================================================
+# The public surface is intentionally small. Exact signatures, types, and per-
+# method tests are defined in module/task intents during tech spec.
+
+interface:
+  type: "service"   # consumed as a library/engine API by agent code
+
+  design_principle_no_query_language: >
+    Cairn exposes NO graph query language. The agent never writes Gremlin / openCypher / SPARQL.
+    A natural-language retrieval need compiles to a fixed, bounded traversal (relation closure from
+    resolved canonical IDs). When a graph backend exists (Neptune / Neo4j / FalkorDB), the GraphAdapter
+    translates that traversal intent into the backend's language and the backend executes it; when no
+    graph backend exists, Cairn runs the bounded BFS itself over its serialized map. Cairn decides WHAT
+    to traverse; the backend executes HOW. This is deliberate: exposing a query language would make Cairn
+    a graph engine — crossing the build_boundary into "yet another database." Having the agent generate
+    graph queries is the non-deterministic, hallucination-prone path Cairn exists to remove.
+
+  tools:
+    - name: "resolve"
+      description: "Detect entity mentions in a query and resolve them to canonical entity IDs (deterministic: exact + alias + fuzzy; LLM/embedding only as optional last-tier fallback)."
+      parameters:
+        - name: "query"
+          type: "string"
+          required: true
+          description: "Natural-language request or text containing entity mentions"
+      returns: "List of resolved entities (canonical_id, surface_form, confidence, tier) + unresolved mentions"
+      test: "packages/cairn-engine/tests/unit/test_resolve.py"  # implemented as cairn.resolve()
+
+    - name: "route"
+      description: "Run the adaptive gate: decide whether to retrieve and which signal(s) to use for this query, given resolved entities and corpus shape."
+      parameters:
+        - name: "query"
+          type: "string"
+          required: true
+          description: "The request to route"
+        - name: "resolved"
+          type: "object"
+          required: false
+          description: "Output of resolve(); computed internally if omitted"
+      returns: "A RoutingDecision (strategy: none|grep|semantic|graph|composite, rationale, signals[])"
+      test: "packages/cairn-retrieval/tests/unit/test_gate.py"
+      # IMPLEMENTED AS: cairn_retrieval.gate() — named after OP-33 ("gate", the pattern's own term).
+      # Deviations of record (deliberate, per adaptive_gate_intent.yaml design_decisions):
+      #   - entities arrive PRE-RESOLVED (canonical_ids); the "computed internally if omitted"
+      #     composition lives in retrieve(), which runs resolve -> gate. Keeps gate() fast/pure.
+      #   - rationale -> RoutingDecision.reason; signals[] is implied by strategy (the engine maps
+      #     strategy -> signals); scores carries the per-tier utility audit (richer than signals[]).
+
+    - name: "retrieve"
+      description: "End-to-end: resolve -> route -> orchestrate chosen signals -> assemble and return a ContextPackage. Zero LLM/network calls on the default path."
+      parameters:
+        - name: "query"
+          type: "string"
+          required: true
+          description: "The agent's request"
+        - name: "options"
+          type: "object"
+          required: false
+          description: "Budget/limits, backend selection, signal overrides"
+      returns: "ContextPackage (assembled context, provenance, entities, decision trace)"
+      test: "packages/cairn-retrieval/tests/unit/test_retrieve.py"
+      # IMPLEMENTED AS: cairn_retrieval.RetrievalEngine.retrieve() (a method — the engine holds the
+      # pre-built table/corpus/indexes). ContextPackage == RetrievalResult(decision, context, fused,
+      # entities): context.text+manifest = assembled context + provenance; decision = the trace.
+
+# ==============================================================================
+# CONSTRAINTS (architectural invariants)
+# ==============================================================================
+# These are the non-negotiable invariants that define Cairn. Fine-grained,
+# fully-tested constraints (with joint-satisfaction gates) are authored per
+# module in the tech-spec phase. Most are ASSUMED at charter stage — they are
+# converted to KNOWN as the tech spec validates them. Critical invariants are
+# listed LAST (position bias — UltraBench 2025).
+
+constraints:
+  - name: "progressive_scale_one_api"
+    requirement: "A single public API serves both an in-memory small corpus and a backend-backed large corpus; switching scale changes configuration/adapter, not call sites."
+    test: "packages/cairn-engine/tests/unit/test_sqlite_adapter.py::test_matches_inmemory_behavior"  # differential: same resolve() call sites, two backends (in-memory + SQLite)
+    test_provenance: "execution_derived"
+    assumption_status: "KNOWN"   # validated 2026-07-12 (M2.2 differential test passing)
+    entropy: "near-zero"
+    priority: 5
+    consequence_if_violated: "Users must rewrite agent code to grow — the same adoption tax that couples teams to a database. Kills the 'route, don't own storage' thesis."
+
+  - name: "local_first_no_mandatory_cloud"
+    requirement: "Full default functionality works fully offline: no mandatory cloud account, no mandatory API key on the deterministic path."
+    test: "packages/cairn-engine/tests/unit/test_resolve.py::test_byte_stable_and_offline"  # sockets disabled during resolve; also test_no_third_party_imports_on_default_path
+    test_provenance: "execution_derived"
+    assumption_status: "KNOWN"   # validated 2026-07-12 (offline + no-key tests passing)
+    entropy: "near-zero"
+    priority: 4
+    consequence_if_violated: "Excludes privacy/local-first users and reintroduces the mandatory-OpenAI-embeddings dependency that disqualifies competing engines."
+
+  - name: "adaptive_gate_precedes_retrieval"
+    requirement: "Every retrieve() call evaluates the routing gate BEFORE any signal executes; 'no retrieval' is a valid, reachable decision."
+    test: "packages/cairn-retrieval/tests/unit/test_retrieve.py::test_skip_path_runs_no_signals"  # gate short-circuits before any signal; none-reachable also in test_gate.py::test_stage2_none_reachable_and_tail_flip
+    test_provenance: "execution_derived"
+    assumption_status: "KNOWN"   # validated 2026-07-12 (M3.1 + M3.6 tests passing)
+    entropy: "near-zero"
+    priority: 3
+    consequence_if_violated: "Degenerates into blind fan-out retrieval — the expensive, noisy behavior Cairn exists to replace."
+
+  - name: "explicit_canonical_ontology"
+    requirement: "Entities have explicit, stable canonical IDs supplied/owned by the user; identity is NOT invented by free-form LLM extraction at query time."
+    test: "packages/cairn-engine/tests/unit/test_resolve.py::test_miss_goes_to_unresolved_never_synthesized"  # + test_arbiter_fires_only_in_band_and_cannot_mint (identity never invented)
+    test_provenance: "human_authored"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 2
+    consequence_if_violated: "Reproduces the schema-agnostic-extraction failure mode (inconsistent graph structure over time) — the standing critique of LLM-built knowledge graphs."
+
+  - name: "storage_agnostic_core"
+    requirement: "The engine core has zero hard dependency on any specific database or vector store; all storage access is behind an adapter interface. COROLLARY: the core exposes no graph query language and never has the agent author Gremlin/openCypher/SPARQL — it compiles a fixed bounded traversal intent and delegates execution to the backend's language via the GraphAdapter when a graph backend is present (see interface.design_principle_no_query_language)."
+    test: "packages/cairn-engine/tests/unit/test_cypher.py::test_core_imports_no_db_driver"  # static-scans every core source file for DB-driver imports
+    test_provenance: "execution_derived"
+    assumption_status: "KNOWN"   # validated 2026-07-12 (M2.2 SQLite + M2.3 openCypher both behind adapters; static guard passing)
+    entropy: "near-zero"
+    priority: 2
+    consequence_if_violated: "Cairn becomes 'yet another database with a migration cost' instead of a routing layer — collapses the core differentiator."
+
+  - name: "deterministic_resolution_no_llm"
+    requirement: "Entity resolution Tiers 1-2 (exact + alias + deterministic fuzzy) issue zero LLM and zero embedding calls; the same input yields byte-identical resolution output across runs."
+    test: "packages/cairn-engine/tests/unit/test_resolve.py::test_byte_stable_and_offline"  # byte-identical across runs; + test_no_third_party_imports_on_default_path (zero LLM/embedding on Tiers 1-2)
+    test_provenance: "execution_derived"
+    assumption_status: "KNOWN"   # validated 2026-07-12 (byte-stability + import-ban tests passing)
+    entropy: "near-zero"
+    priority: 1
+    consequence_if_violated: "Loses reproducibility, auditability, cost control, and speed — and reintroduces the non-determinism that makes LLM-built graphs drift."
+
+  - name: "zero_llm_calls_on_hot_path"
+    requirement: >
+      The default retrieve() hot path makes zero GENERATIVE-LLM calls and zero network/API calls.
+      "LLM" here means a generative / autoregressive model or any remote model API. LOCAL,
+      DETERMINISTIC, DISCRIMINATIVE models (e.g. a cross-encoder reranker, an embedding encoder,
+      LLMLingua-2's token classifier) ARE admissible on the hot path because they are byte-stable,
+      offline, and add no API dependency. A stricter "zero-ML" mode (BM25 + RRF + MMR + cosine-dedup
+      only, no neural net at all) is available as an explicit opt-in for purists. Any generative-LLM
+      or remote-API use is opt-in, isolated to a clearly-named optional tier, and never on the default path.
+    test: "packages/cairn-retrieval/tests/unit/test_retrieve.py::test_hot_path_purity"  # counting embedder receives 0 calls on skip/lexical/graph routes; static-scan for LLM/network imports. NOTE: the shipped DEFAULT is already the stricter zero-ML mode — the embedder/semantic tier only runs when explicitly supplied.
+    test_provenance: "execution_derived"
+    assumption_status: "KNOWN"   # resolved 2026-06-26: zero-generative-LLM, not zero-ML
+    entropy: "near-zero"
+    priority: 1
+    consequence_if_violated: "Cairn inherits the exact cost/latency/fragility profile (3-6 LLM calls per unit of work, mandatory cloud key) that it was built to escape. This is the defining invariant — if it fails, the project has no reason to exist."
+
+# CONSTRAINT SATISFIABILITY (charter note — full joint test authored in tech spec)
+constraint_satisfiability:
+  conflicts_checked: true
+  known_tensions:
+    - between: ["zero_llm_calls_on_hot_path", "explicit_canonical_ontology"]
+      resolution: "Building the canonical ontology/alias table MAY use an LLM offline at authoring/ingest time (a deliberate, batched, optional step). The HOT PATH (resolve/route/retrieve) stays LLM-free. The two are separated by phase: build-time vs query-time."
+    - between: ["deterministic_resolution_no_llm", "progressive_scale_one_api"]
+      resolution: "Determinism is a property of Tiers 1-2; the optional semantic tier (which may be probabilistic) is gated and off by default, so scaling up does not silently break determinism — it must be explicitly enabled."
+  simultaneous_satisfaction: "All satisfiable once build-time vs hot-path and default vs opt-in tiers are kept distinct. Joint test authored in tech-spec phase."
+  joint_satisfaction_test: "tests/test_joint_invariants.py::test_charter_invariants_on_one_retrieve (defined in tech-spec phase)"
+
+# ==============================================================================
+# RATIONALE
+# ==============================================================================
+
+rationale:
+  decision: "Build the agent retrieval DECISION + ROUTING layer as a storage-agnostic, deterministic, local-first library — explicitly NOT a database and NOT an LLM ingestion pipeline."
+  reasoning: |
+    Deep research into the current agent-memory / retrieval landscape (Graphiti/
+    Zep, FalkorDB, Mem0, vector-RAG, agentic grep) converges on one finding: the
+    storage and ingestion layers are crowded and well-funded, but they were
+    designed for enterprise KG, document RAG, or temporal LLM memory — not for
+    the agent access pattern. The recurring, unsolved problems are above the
+    store:
+      - deciding whether/what/how to retrieve (adaptive gate),
+      - resolving messy human references to canonical identity deterministically,
+      - traversing relations to assemble minimal context,
+      - composing lexical + semantic + graph signals coherently.
+    These are orthogonal to which database holds the bytes. Cairn isolates that
+    layer so it can be reused above any store, run locally, and stay
+    deterministic — directly inverting the three dominant beliefs captured in
+    inversion_opportunities.
+  evidence: |
+    Public sources informing this charter (full citations carried into the
+    research phase): GraphRAG (arXiv:2404.16130) on global-sensemaking vs local
+    lookup; Zep/Graphiti (arXiv:2501.13956) temporal KG architecture and its
+    LLM-call cost profile and community critiques; FalkorDB performance and
+    production-issue record; the entity-linking / resolution literature
+    (REBEL, ReLiK, GLiNER) on deterministic-first resolution tiers.
+  date: "2026-06-26"
+  stakeholder: "Maintainer (charter author) — pending stress-test + review gate"
+
+# ==============================================================================
+# MARKET POSITIONING (why Cairn can be the best option — honestly scoped)
+# ==============================================================================
+
+market_positioning:
+  the_market_is_crowded: >
+    Building an entity world / memory layer for agents is NOT an empty niche. Graphiti/Zep
+    (~27.9K stars, Apache-2.0), Mem0 (storage-agnostic, multi-signal fusion: semantic +
+    keyword + entity), and MinnsDB (RRF over 7 sources incl. entity resolution) already do
+    it, with funding and distribution. Cairn enters with a contrarian thesis, not into empty space.
+  the_wedge: >
+    Cairn is not "better at everything." It wins on one axis the incumbents cannot follow
+    without rebuilding their core: a TRUSTWORTHY world model. Incumbents bet LLM-in-the-loop
+    to construct the graph (3-6 LLM calls/episode in Graphiti) — a bet structurally
+    incompatible with determinism, auditability, and drift-freedom. Cairn makes the opposite
+    bet: discriminative build-time extraction + a frozen canonical closed world + zero
+    generative-LLM on the hot path. They cannot adopt this without abandoning their architecture.
+  best_for:
+    - "Local-first / privacy / regulated users who cannot send data to a cloud LLM to index"
+    - "Reproducibility / auditability needs (compliance, finance, eval-driven engineering)"
+    - "Teams that refuse to adopt another database — route over existing stores"
+    - "Cost at scale — zero generative-LLM calls on the hot path"
+  not_best_for:
+    - "Users who want the richest possible graph regardless of drift (LLM-in-the-loop wins there)"
+    - "Pure document semantic search with no entity / relational structure"
+  honest_caveats:
+    - "CONDITIONAL: 'best' is scoped to the trustworthy / local-first / auditable axis — not best-at-everything."
+    - "UNPROVEN: 'best' is a thesis until the OP-31 benchmark measures determinism + quality + cost against Mem0 / Graphiti / agentic-grep / vector-RAG. Until then it is a well-grounded claim, not a fact."
+    - "DISTRIBUTION: best-technically does not auto-win. Incumbents have stars and funding; Cairn wins only if the trust-pain is real for the target user and they seek it out."
+  build_boundary: >
+    Cairn BUILDS the map (canonical alias table + graph structure) by orchestrating EXISTING
+    extractors (GLiNER / ReLiK / REBEL) and FREEZING the result — it does not own storage,
+    does not reimplement NER, does not hold the bytes. Extraction is reliable AND mostly
+    deterministic (discriminative methods, 90-94%+); the generative LLM is the <5% ambiguous
+    tail, offline + human-gated. The determinism boundary is the FROZEN alias table, not the
+    extraction process. Crossing this boundary (storing bytes, reimplementing a graph engine)
+    collapses the thesis into "yet another database."
+
+# ==============================================================================
+# OPEN QUESTIONS (load-bearing design decisions to settle in the tech-spec phase)
+# ==============================================================================
+# Tight list — only decisions that block the tech spec. Everything else lives in
+# the patterns/research, not here. Each names the artifact that will resolve it.
+
+open_questions:
+  - id: "OQ-1"
+    question: "Where do the relations (graph edges) live, and at what scale do they move out of Cairn's own map?"
+    options: "Small corpus → edges in Cairn's serialized map (in-memory / YAML / SQLite), no external graph DB. Large corpus → route over an external graph backend (Neptune / Neo4j / FalkorDB) via GraphAdapter."
+    needs: "A default + a scale cutoff (entity/edge count) where the in-map model hands off to a backend adapter."
+    resolved_by: "tech-spec: core/traversal + adapters/ module intents"
+    related: "OP-34 (traversal); storage_agnostic_core"
+
+  - id: "OQ-2"
+    question: "What makes a doc reference (doc_id / path) stable and resolvable across re-indexing?"
+    why_load_bearing: "Cairn stores references, not content (the map points at the user's stores). If a doc_id changes on re-index, every reference to it breaks and the map loses value."
+    needs: "A doc_id stability + resolvability contract that every storage adapter must satisfy."
+    resolved_by: "tech-spec: adapters/ module intent (per-store adapter contract)"
+    related: "build_boundary; OP-35 (refs in the entity record)"
+
+  - id: "OQ-3"
+    question: "How does the bounded traversal intent translate to each backend's query language?"
+    detail: "openCypher (Neptune/Neo4j/FalkorDB), Gremlin (Neptune), SPARQL (RDF stores) — the GraphAdapter must compile the same bounded-closure intent to each, deterministically."
+    needs: "A traversal-intent → backend-query compilation spec per supported backend, with a determinism guarantee."
+    resolved_by: "RESOLVED for openCypher (M2.3, 2026-07-12): compile_traversal() emits one byte-stable openCypher query; traverse_cypher() executes it via a caller-supplied driver callable (cairn imports no DB driver). See graph_backend_intent.yaml. Gremlin/SPARQL compilation remain open (later milestone)."
+    related: "interface.design_principle_no_query_language; OP-34"
+
+  - id: "OQ-4"
+    question: "Open-end interval sentinel — NULL vs +∞ — for bi-temporal validity columns?"
+    why_load_bearing: "The half-open interval comparison (T < end) is ambiguous until the open-end representation is pinned; it affects every point-in-time query."
+    resolved_by: "RESOLVED (M2.1, 2026-07-12): None == open end (+∞). Every interval is half-open [start, end). The single `_within(start, end, at)` predicate in entity/bitemporal.py is the one place the rule lives; traverse imports it. See entity_bitemporal_intent.yaml design_decisions.open_end_sentinel."
+    related: "TH-3 (bitemporal); OP-35"
+
+# ==============================================================================
+# ALTERNATIVES (why not adopt an existing engine)
+# ==============================================================================
+
+alternatives:
+  - name: "Adopt Graphiti/Zep as the agent memory layer"
+    rejected_because: |
+      Couples memory to a specific graph DB; mandatory LLM ingestion (3-6 calls/
+      episode) and mandatory cloud embeddings even when using a local LLM; non-
+      deterministic, schema-agnostic extraction yields graphs that drift; the
+      index is a memory store, not a routing layer. Solves a different problem.
+    date_tested: "2026-06"
+
+  - name: "Plain vector-DB RAG (embed everything, top-k retrieve)"
+    rejected_because: |
+      No entity identity or relation traversal; blind top-k retrieval with no
+      adaptive gate; mandatory embeddings (often cloud); weak on multi-entity,
+      relational, 'connect these' agent queries. Cairn can USE a vector store as
+      one optional signal, but RAG-only is not the layer agents need."
+    date_tested: "2026-06"
+
+  - name: "FalkorDB / Neo4j GraphRAG SDK"
+    rejected_because: |
+      Storage-coupled and LLM-extraction-coupled; inherits the host DB's
+      operational and (for FalkorDB) production-stability burden; not local-first
+      or storage-agnostic. Cairn can route over such a graph as a backend
+      adapter, but should not BE one.
+    date_tested: "2026-06"
+
+  - name: "Cursor-style agentic grep (re-discover via tool round-trips)"
+    rejected_because: |
+      Stateless re-discovery is token-expensive (many glob/grep/read round-trips
+      per query), has no entity identity or relation model, and repeats work
+      every turn. It is the baseline Cairn aims to beat, not adopt."
+    date_tested: "2026-06"
+
+# ==============================================================================
+# RISKS
+# ==============================================================================
+
+risks:
+  - condition: "Scope creep toward building a full storage/graph engine ('works at any scale' interpreted as 'reimplement a distributed DB')."
+    action: "Hold the line: Cairn routes over backends via adapters; it does not implement storage, replication, or sharding. Anything below the adapter boundary is out of scope."
+    monitor: "Any PR adding a concrete storage engine to core (not an adapter)."
+    severity: "high"
+
+  - condition: "Determinism erodes as optional semantic/LLM tiers leak onto the default path."
+    action: "Keep probabilistic tiers opt-in and behind explicit configuration; enforce the zero-call hot-path test in CI."
+    monitor: "CI hot-path purity test; coverage of the gate decision branches."
+    severity: "high"
+
+  - condition: "Ontology authoring burden (canonical IDs + aliases) deters adoption for large corpora."
+    action: "Provide an optional, offline, batched build-time helper (may use an LLM) to bootstrap the alias table — separate from the hot path; never required to query."
+    monitor: "Quickstart friction; issues mentioning setup cost."
+    severity: "medium"
+
+  - condition: "Charter constraints prove jointly unsatisfiable under a real backend."
+    action: "Run the IVD stress-test (Rule 4) and author the joint-satisfaction test before implementation; revise invariants empirically (Rule 5) if a real backend contradicts an assumption."
+    monitor: "Tech-spec phase joint test; first backend-adapter spike."
+    severity: "medium"
+
+  - condition: "The market is crowded and funded (Graphiti, Mem0, Zep, MinnsDB); best-technically does not guarantee adoption."
+    action: "Compete on the determinism wedge, not feature parity. Prove it with the OP-31 benchmark before scaling effort. Validate that a real target user's pain is trust/auditability, not speed, before betting on it."
+    monitor: "Benchmark results vs incumbents; adoption signals from the trustworthy / local-first segment specifically."
+    severity: "high"
+
+# ==============================================================================
+# IMPLEMENTATION (charter placeholder — defined in tech-spec phase)
+# ==============================================================================
+
+implementation:
+  current: "scaffold in place (monorepo, two packages); entity model real, algorithm modules stubbed"
+  version: 0
+  tests: "scaffold smoke tests present; module tests authored per milestone (see ROADMAP.md)"
+  documentation: "README + ROADMAP + PRD + ivd-style module intents (tech-spec phase)"
+  packaging:
+    decision: "Decision (b): the entity subsystem is a STANDALONE PUBLISHED library, not just an internal module. Monorepo (uv workspace) publishing two packages on staggered timelines."
+    packages:
+      - "cairn-engine — the deterministic entity / world-model engine (foundational; ships FIRST). packages/cairn-engine/src/cairn_engine/{entity,adapters}"
+      - "cairn-retrieval — the agent-retrieval layer (gate, signals, assembler) on top; depends on cairn; 0.x until proven"
+    rationale: "Both external validation use cases (blog internal linking, a game-lore entity graph) need ONLY the entity engine, not the retrieval layer — evidence the subsystem is separable and independently valuable. Monorepo + staggered publication gives clean boundaries without paying 'two stable products at once' (stabilize cairn first, keep cairn-retrieval 0.x)."
+    standard: "uv workspace + hatchling build backend + python-semantic-release; the standard OSS multi-package-monorepo pattern (cf. langchain-core / langchain)."
+  planned_shape:
+    - "packages/cairn-engine/src/cairn_engine/entity/ — model (real) · resolve · ontology · traverse (OP-28/34/35, TH-1..5)"
+    - "packages/cairn-engine/src/cairn_engine/adapters/ — AliasTableAdapter + GraphAdapter protocols; concrete adapters per milestone"
+    - "packages/cairn-retrieval/src/cairn_retrieval/ — gate, orchestrator, assembler (Phase 3)"
+    - "tests/ per package — determinism, hot-path purity, joint-invariants, benchmark harness"
+
+# ==============================================================================
+# NEXT PHASE (project roadmap; respects IVD Rules 3b + 4)
+# ==============================================================================
+# This charter is step 3 of: name -> dir -> charter intent -> [research ->
+# patterns -> use cases -> tech spec -> roadmap -> refined intent].
+# Before any implementation:
+#   1. RESEARCH    — ground each invariant in public sources + benchmarks.
+#   2. PATTERNS    — extract reusable patterns (gate tests, resolution tiers, fusion).
+#   3. USE CASES   — concrete agent queries the engine must serve.
+#   4. TECH SPEC   — module/task intents with fully-tested, near-zero-entropy constraints.
+#   5. ROADMAP     — milestones; first vertical slice = deterministic in-memory path.
+#   6. STRESS-TEST + REVIEW GATE (IVD Rule 4 + Rule 3b) — adversarial probe; human sign-off.
+#   7. REFINED INTENT — fold findings back; promote ASSUMED -> KNOWN.
+
+# ==============================================================================
+# VERIFICATION
+# ==============================================================================
+# CHARTER-STAGE STATUS: all constraints are UNVERIFIED by design — their test
+# files are authored in the tech-spec phase. ivd_validate correctly reports
+# UNVERIFIED + JOINT_TEST_UNVERIFIED and blocks any "implementation complete"
+# claim. That gate is intended: it stays red until the tech-spec phase writes
+# the tests below and the first vertical slice passes them. We do NOT fabricate
+# execution_oracles or claim PASS at charter stage.
+
+verification:
+  status: "UNVERIFIED — charter precedes tests (intended; gate clears in tech-spec phase)"
+
+  test_cases:
+    - name: "hot_path_purity"
+      description: "retrieve() on the default path invokes neither the LLM client nor the network."
+      input:
+        query: "give me everything connected to <entity>"
+        options: {default_path: true}
+      expected_output:
+        completed: true
+        llm_calls: 0
+        network_calls: 0
+      validates_constraint: "zero_llm_calls_on_hot_path"
+
+    - name: "deterministic_resolution"
+      description: "Resolving the same query twice yields byte-identical output with zero LLM/embedding calls."
+      input:
+        query: "what does <alias> own?"
+      expected_output:
+        identical_across_runs: true
+        llm_calls: 0
+        embedding_calls: 0
+      validates_constraint: "deterministic_resolution_no_llm"
+
+    - name: "alias_to_canonical"
+      description: "An ambiguous alias resolves to the pre-declared canonical entity, not a hallucinated node."
+      input:
+        query: "tell me about <ambiguous_alias>"
+      expected_output:
+        canonical_id: "<declared_id>"
+        hallucinated: false
+      validates_constraint: "explicit_canonical_ontology"
+
+    - name: "gate_can_say_none"
+      description: "A query answerable from parametric knowledge routes to strategy=none (no signal runs)."
+      input:
+        query: "what is 2 + 2?"
+      expected_output:
+        strategy: "none"
+        signals_invoked: 0
+      validates_constraint: "adaptive_gate_precedes_retrieval"
+
+  property_tests:
+    - property: "storage_agnosticism"
+      test: "Engine core produces equivalent ContextPackages across >= 2 adapters for the same corpus."
+      verification: "tests/test_storage_agnostic.py::test_equivalent_across_adapters"
+
+    - property: "scale_api_stability"
+      test: "Identical call sites work for in-memory and backend-backed corpora."
+      verification: "tests/test_scale.py::test_same_api_across_adapters"
+
+  joint_satisfaction:
+    description: "All seven invariants hold simultaneously on ONE retrieve() output."
+    test: "tests/test_joint_invariants.py::test_charter_invariants_on_one_retrieve"
+    status: "JOINT_TEST_UNVERIFIED — authored in tech-spec phase"
+
+# ==============================================================================
+# CHANGELOG
+# ==============================================================================
+
+changelog:
+  - version: "0.1.0"
+    date: "2026-06-26"
+    change: "Initial system charter: thesis, three inversions, three primitives (adaptive gate, entity-first routing, signal orchestration), seven architectural invariants (critical-last), alternatives, and risks."
+    reason: "Seed the project as an OSS, agent-native retrieval engine, agnostic to any specific user/project/stack, in the IVD intent format. Pre-research north star to be hardened through the research->tech-spec->refined-intent phases."
+    evidence: "Landscape research on Graphiti/Zep, FalkorDB, vector-RAG, and agentic grep; entity-resolution literature."
+
+  - version: "0.1.1"
+    date: "2026-06-26"
+    change: "Resolved the zero-LLM ambiguity surfaced by the context-assembly/lexical/eval gap research: the hot-path invariant means zero GENERATIVE-LLM and zero remote-API — local deterministic discriminative models (cross-encoder reranker, encoder classifier) ARE admissible; a stricter zero-ML mode is an explicit opt-in. Promoted constraint assumption_status KNOWN."
+    reason: "Cross-encoder reranking is a large, deterministic, local, offline quality gain that does not violate determinism, local-first, or cost invariants; banning it would forfeit quality for no real purity benefit. Purists keep a zero-ML mode."
+    evidence: "context/CONTEXT_ASSEMBLY_AND_PACKING_RESEARCH_2026.md §3 (LLM-free vs LLM-dependent table); LLMLingua-2 (arXiv:2403.12968) classifier is non-generative."
+
+  - version: "0.2.0"
+    date: "2026-06-27"
+    change: >
+      Added the north_star chain (Super Agent -> trustworthy world model -> entities -> Cairn) and a
+      market_positioning section (crowded-market reality, the determinism wedge, best_for / not_best_for,
+      three honest caveats: conditional / unproven / distribution, and the build_boundary). Reframed the
+      summary around 'deterministic world-model engine for super-agents'. Added a competitive/distribution
+      risk. Established ENTITIES (Primitive B) as the foundational subsystem; goal scoped to Super Agent,
+      explicitly NOT AGI.
+      Supporting artifacts produced this session: 5 theoretical-foundation research docs
+      (foundations/) + patterns_entities.yaml (TH-1..TH-5 + OP-28/34/35); 4 gap-fill OPs
+      (OP-32 RRF fusion, OP-33 gate cost model, OP-34 traversal, OP-35 ontology authoring).
+    reason: >
+      Conversation surfaced the real purpose (Cairn is the world-model substrate of a super agent, not a
+      generic RAG library) and the honest competitive position (the entity-world space is crowded and funded;
+      Cairn's only defensible edge is the determinism wedge, and 'best' is a thesis until the OP-31 benchmark
+      proves it). Writing this down so it is not re-derived or lost when the tech spec begins.
+      The build_boundary is recorded to prevent the 'builds the map' scope from sliding into 'builds a database'.
+    evidence: >
+      Landscape verification (internal docs/research/databases/ + external: Mem0 state-of-agent-memory 2026,
+      Vectorize/Atlan comparisons, dedupe/Splink for ER); ENTITY_RELATIONSHIP_RESOLUTION research on
+      discriminative-extraction reliability + determinism; the 5 foundations docs grounding the determinism thesis."
+
+  - version: "0.2.1"
+    date: "2026-06-27"
+    change: >
+      Documented the no-query-language / compile-and-delegate principle (interface.design_principle_no_query_language
+      + corollary folded into the storage_agnostic_core constraint — kept constraint count at 7 per IVD Rule 6,
+      did NOT add an 8th). Added an open_questions section with 4 load-bearing, tech-spec-blocking decisions:
+      OQ-1 where relations live + scale cutoff, OQ-2 doc_id stability/resolvability contract, OQ-3 traversal-intent
+      → backend-query compilation, OQ-4 bitemporal open-end sentinel.
+    reason: >
+      The charter read first but knew less than the patterns (OP-34 had the GraphAdapter/delegation; the charter did not).
+      The no-query-language principle is what keeps Cairn from being a graph DB and is the inversion that makes it
+      agent-native, so it belongs at charter tier. Open design decisions were invisible (only the stress-test gate was
+      marked pending); surfacing the load-bearing ones prevents them being silently assumed at tech-spec.
+    evidence: "Neptune query languages verified (AWS docs: Gremlin/openCypher/SPARQL); Neptune already listed as a backend in GRAPH_DATABASES_AND_ENTITY_LIBRARIES_2026.md; OP-34 GraphAdapter Protocol in patterns_entities.yaml."

@@ -1,0 +1,162 @@
+# ==============================================================================
+# cairn-retrieval — Module Intent: connection suggestion (cold-start link pred.)
+# ==============================================================================
+# License: MIT · Copyright (c) 2026 Leo Celis · https://ivdframework.dev
+# Parent: ../../../cairn_system_intent.yaml (v0.2.1)
+# Patterns: patterns_retrieval_knowledge.yaml OP-36 (connection suggestion),
+#           OP-33 (link_ranking — the node<->node measure this generalises).
+# Research: docs/research/foundations/LINK_PREDICTION_AND_CONNECTION_SUGGESTION_RESEARCH_2026.md
+# Feedback: docs/feedback/retrieval_ranking_feedback.yaml (round 1 boundaries honored)
+# Boundary note: this is RANKING (relevance), which lives in cairn-retrieval —
+#   NOT in the entity engine, whose traverse() only does structural bounded
+#   closure. The engine supplies the graph; this weighs a CANDIDATE against it.
+# ==============================================================================
+
+scope:
+  level: "module"
+  type: "feature"
+  granularity: "fine"
+
+metadata:
+  feature_id: "cairn_retrieval_connection_suggestion"
+  category: "agent_infrastructure"
+  tags: ["ranking", "link-prediction", "cold-start", "schema-matching", "deterministic"]
+  status: "in_progress"
+  introduced_version: "0.2.0"
+
+intent:
+  summary: "Given a CANDIDATE node not yet in the graph (a table/module about to be created), rank the existing entities it should connect to. Cold-start: the candidate has no edges, so every structural index is 0; content similarity (TF-IDF COSINE over shared concepts, corpus IDF) is the primary signal. An optional Adamic-Adar/Resource-Allocation structural term fires only when the caller supplies seed entities the candidate provisionally relates to. Deterministic, zero-dep, zero-LLM on the default path."
+  goal: |
+    The candidate-vs-corpus generalisation of link_ranking (OP-33). Where
+    rank_links scores existing document<->document pairs, suggest_connections
+    scores a NEW candidate against every existing entity:
+      concept_idf(existing)         -> corpus IDF (reused from link_ranking);
+      candidate tf*idf vector        -> built against THAT corpus IDF;
+      content_score(y)               -> cosine(candidate_vec, y_vec) in [0,1];
+      structural_score(y)            -> RA/AA over seeds ∩ Γ(y) (0 without seeds);
+      total(y)                       -> content + graph_weight·structural_norm.
+    Returns ranked ConnectionSuggestion(target_id, score, content_score,
+    structural_score, shared, via) — provenance so a human/agent sees WHY.
+  success_metric: "A candidate sharing a rare concept with entity A and only a ubiquitous concept with B ranks A above B and drops B (score 0). With no seeds, structural_score is exactly 0 for all targets. A candidate whose only concepts are novel (absent from corpus) returns []. Byte-identical across runs."
+  stakeholders:
+    - "agents/developers designing a new table/module who need the existing-graph connections it should have (the schema-graph gap)"
+
+interface:
+  type: "library"
+  tools:
+    - name: "suggest_connections"
+      description: "suggest_connections(candidate, existing, *, top_k=5, doc_type='document', concept_type='concept', seeds=(), graph_weight=0.25) -> list[ConnectionSuggestion]. Rank existing entities the candidate should link to."
+      parameters:
+        - name: "candidate"
+          type: "object"
+          required: true
+          description: "An Entity (NOT in `existing`) whose relations to concept-type entities describe it."
+        - name: "existing"
+          type: "array"
+          required: true
+          description: "The frozen graph's entities (e.g. table.canonical_entities())."
+        - name: "seeds"
+          type: "array"
+          required: false
+          description: "Optional canonical_ids the candidate provisionally relates to; enables the structural term."
+      returns: "list[ConnectionSuggestion(target_id, score, content_score, structural_score, shared, via)] — deterministic order"
+      test: "packages/cairn-retrieval/tests/unit/test_connections.py"
+
+# Critical constraints LAST (position bias: later = weighted more).
+constraints:
+  - name: "content_similarity_cold_start"
+    requirement: "content_score(candidate, y) = cosine of the candidate's TF-IDF concept vector against y's, in [0,1], using IDF computed from the EXISTING corpus (concept_idf). A concept the candidate has that no existing entity mentions (df=0 in corpus) contributes 0 — it matches nothing. This is the primary signal because a cold-start candidate has no edges for structural indices to use."
+    test: "packages/cairn-retrieval/tests/unit/test_connections.py::test_content_ranks_shared_rare_concept_first"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      golden_fixture: "candidate shares rare concept with A (cosine 1.0), ubiquitous-only with B (IDF 0 -> dropped); A ranked, B absent"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 4
+
+  - name: "structural_signal_optional_seeds_only"
+    requirement: "structural_score(y) = sum over s in (seeds ∩ Γ(y)) of 1/deg(s) (Resource Allocation; AA=1/log deg is the documented alternative), where Γ and deg are over the entity-entity graph among `existing`. When seeds is empty, structural_score(y) = 0 for EVERY y — the API must not manufacture structural evidence a cold node cannot have. Seeds themselves are inputs, not results."
+    test: "packages/cairn-retrieval/tests/unit/test_connections.py::test_structural_zero_without_seeds"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      golden_fixture: "no seeds -> every structural_score == 0.0; with seed S, a target sharing S as neighbour gets 1/deg(S)"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 3
+
+  - name: "provenance_and_closed_world"
+    requirement: "Every suggestion carries its evidence: `shared` = the shared concept ids that earned content_score, `via` = the seed ids that contributed structural_score. A candidate with empty concepts and no seeds, or with zero overlap, returns [] — never a fabricated connection. Suggestions with total score 0 are dropped."
+    test: "packages/cairn-retrieval/tests/unit/test_connections.py::test_provenance_and_empty_on_no_overlap"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      golden_fixture: "no overlap -> []; a real suggestion -> shared non-empty; seed-driven -> via non-empty"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 2
+
+  - name: "deterministic_pure_graph_no_engine_leak"
+    requirement: "Output order deterministic: total desc then target_id asc; only real existing ids appear (never the candidate, never a synthesized id). Pure stdlib (math only), no LLM, no network, no third-party deps; same inputs -> byte-identical result. Lives in cairn-retrieval; does not modify the engine or its traverse()."
+    test: "packages/cairn-retrieval/tests/unit/test_connections.py::test_deterministic_and_closed_world"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      property_test: "repeated calls repr-equal; every target_id exists in `existing` and != candidate id; module imports stdlib + cairn_engine only"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 1
+
+constraint_satisfiability:
+  conflicts_checked: true
+  known_tensions:
+    - tension: "content vs structural scale mismatch (cosine in [0,1] vs sum of 1/deg)"
+      resolution: "structural_norm = structural_score / len(seeds) (≤1); fused content-dominant via graph_weight=0.25 default."
+  simultaneous_satisfaction: "All satisfiable: one pure function; content and structural are additive terms, provenance is carried alongside, determinism from sorted output + rounding."
+  joint_satisfaction_test: "packages/cairn-retrieval/tests/unit/test_connections.py::test_joint_connection_suggestion"
+
+rationale:
+  decision: "Content-first (TF-IDF cosine, corpus IDF) with an optional seed-gated RA/AA structural term; scoring lives in cairn-retrieval, generalising link_ranking to a candidate."
+  reasoning: "OP-36. A brand-new node has no edges, so structural indices (CN/AA/RA) are 0 — the cold-start regime, where the literature is consistent that content/attribute similarity is the signal (Lü & Zhou; Rahm & Bernstein linguistic matcher; cold-start link-prediction papers). Reusing concept_idf keeps one relevance mechanism, not two. The structural term is honestly gated on seeds because it is meaningless without at least one provisional edge."
+  evidence: "docs/research/foundations/LINK_PREDICTION_AND_CONNECTION_SUGGESTION_RESEARCH_2026.md; OP-36; feedback round 1 boundaries."
+  date: "2026-07-14"
+  stakeholder: "Maintainer"
+
+alternatives:
+  - name: "Matrix factorisation / graph autoencoder for cold-start"
+    rejected_because: "Learned, non-deterministic, dependency-heavy — violates zero-dep/byte-stable/zero-LLM default. Documented as an opt-in accelerator, never the default path."
+    date_tested: "2026-07-14"
+  - name: "Structural indices as the primary signal"
+    rejected_because: "A cold-start candidate has NO edges — CN/AA/RA are all 0. Structural cannot be primary for a node that does not yet exist; content must lead."
+    date_tested: "2026-07-14"
+  - name: "Put candidate scoring in the engine's traverse()"
+    rejected_because: "traverse() does structural bounded closure over an EXISTING node; a not-yet-existing candidate scored by relevance is retrieval's job (OP-34 boundary, feedback round 1)."
+    date_tested: "2026-07-14"
+
+risks:
+  - condition: "Caller passes a candidate whose concepts are all novel to the corpus."
+    action: "Returns [] (closed world) — correct: nothing to connect to yet. Caller may author the concepts first, then re-run."
+    monitor: "n/a"
+    severity: "low"
+  - condition: "graph_weight mis-set so structural swamps content."
+    action: "Default 0.25 keeps content dominant; documented as calibrate-per-corpus, not a silent default change."
+    monitor: "example output review"
+    severity: "low"
+
+implementation:
+  current: "authored alongside this intent"
+  version: 1
+  tests: "packages/cairn-retrieval/tests/unit/test_connections.py"
+  documentation: "module docstrings; ROADMAP; example examples/schema_connection_suggestion.py"
+
+verification:
+  status: "tests authored with implementation; hand-computed cosine + RA golden values"
+  test_cases:
+    - name: "joint"
+      description: "One suggest_connections call satisfying all four constraints on a hand-built graph"
+      input: {existing: "3 entities + concepts, one rare one ubiquitous", candidate: "shares rare with A", seeds: "one"}
+      expected_output: {A_ranked_first: true, ubiquitous_only_dropped: true, structural_zero_without_seeds: true, provenance_present: true, deterministic: true}
+      validates_constraint: "ALL (joint)"
+
+changelog:
+  - version: "0.1.0"
+    date: "2026-07-14"
+    change: "Initial intent for connection suggestion (cold-start link prediction): 4 constraints, critical-last, joint-satisfaction test. Content-first TF-IDF cosine reusing concept_idf; optional seed-gated RA/AA structural term; provenance + closed-world; ranking kept out of the engine."
+    reason: "IVD Rule 1 — intent before implementation; the schema-graph gap (a new table with no map of existing tables) surfaced the concrete need. Follows the development loop: research -> feedback -> pattern (OP-36) -> implement."

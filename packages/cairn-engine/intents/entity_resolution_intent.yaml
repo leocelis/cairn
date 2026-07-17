@@ -1,0 +1,209 @@
+# ==============================================================================
+# Cairn — Module Intent: core/entity resolution (M1.2 + minimal M1.3 lookup)
+# ==============================================================================
+# License: MIT · Copyright (c) 2026 Leo Celis · https://ivdframework.dev
+# Parent: ../../../cairn_system_intent.yaml (v0.2.1)
+# Patterns: docs/patterns/patterns_entities.yaml — OP-28 (cascade), OP-35 (table),
+#           TH-1 (canonicalization), TH-5 (CWA / NAF)
+# ==============================================================================
+
+scope:
+  level: "module"
+  type: "feature"
+  granularity: "fine"
+
+metadata:
+  feature_id: "cairn_entity_resolution"
+  category: "agent_infrastructure"
+  tags: ["entity-resolution", "deterministic", "hot-path", "gazetteer"]
+  status: "in_progress"
+  introduced_version: "0.1.0"
+
+intent:
+  summary: "Deterministic hot-path entity resolution: detect known-alias mentions in text (gazetteer scan) and resolve surface forms to canonical IDs via a cheap-first cascade (exact -> normalized -> fuzzy), against a frozen in-memory alias table. Zero LLM, zero network, zero third-party deps on the default path."
+  goal: |
+    Implement resolve() (M1.2) plus the minimal InMemoryAliasTable it needs
+    (the lookup slice of M1.3). Tiers implemented now: 1a exact, 1b normalized
+    (NFKC + casefold + punctuation/whitespace collapse), 2 fuzzy (pure-Python
+    token-set ratio, threshold 0.85, Shannon entropy gate 1.5). Tiers 3-4
+    (embedding, LLM arbiter) are opt-in later work, out of scope here.
+  success_metric: |
+    All constraint tests below pass under python 3.11 with ZERO third-party
+    packages installed. Same input -> byte-identical output across runs.
+  stakeholders:
+    - "cairn library users (agent developers)"
+    - "cairn-retrieval (future consumer)"
+
+interface:
+  type: "library"
+  tools:
+    - name: "resolve"
+      description: "resolve(query, *, table, mentions=None, config=None) -> (list[ResolvedEntity], list[str]). If mentions given, resolve each explicitly; else gazetteer-scan the query for known aliases."
+      parameters:
+        - name: "query"
+          type: "string"
+          required: true
+          description: "Free text possibly containing entity mentions"
+        - name: "table"
+          type: "object"
+          required: true
+          description: "AliasTableAdapter (frozen closed world)"
+        - name: "mentions"
+          type: "array"
+          required: false
+          description: "Explicit surface forms to resolve (skips detection)"
+      returns: "(resolved, unresolved) — unresolved lists surface forms that did not clear the cascade"
+      test: "packages/cairn-engine/tests/unit/test_resolve.py"
+
+# Critical constraints LAST (position bias — UltraBench 2025).
+constraints:
+  - name: "normalization_is_nfkc_casefold_collapse"
+    requirement: "normalize(s) = unicode NFKC -> casefold -> non-alphanumeric runs collapse to single spaces -> strip. Pure function of its input; tokenization = split on the collapsed spaces."
+    test: "packages/cairn-engine/tests/unit/test_resolve.py::test_normalization_nfkc_casefold_collapse"
+    test_provenance: "execution_derived"
+    execution_oracle: "golden_fixture: hand-computed pairs incl. NFKC compat chars (e.g. fullwidth), case, hyphens"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 6
+
+  - name: "gazetteer_scan_longest_match_deterministic"
+    requirement: "Detection scans the normalized query for known normalized aliases only (closed world). Overlaps resolve longest-match-first, then leftmost; duplicate (surface, canonical_id) pairs are deduped. Output order is deterministic (query position)."
+    test: "packages/cairn-engine/tests/unit/test_resolve.py::test_scan_longest_match_wins_and_ordering"
+    test_provenance: "execution_derived"
+    execution_oracle: "golden_fixture: query with nested aliases ('payment retry policy' contains 'payment')"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 5
+
+  - name: "fuzzy_tier_thresholded_and_entropy_gated"
+    requirement: "Tier 2 fuzzy uses a pure-Python TOKEN-SORT ratio (difflib SequenceMatcher over the full sorted-token strings — NOT token-set: set semantics score 1.0 whenever one side's tokens are a subset of the other's, letting short aliases like 'payment' dominate any mention containing that token); fires only for explicit mentions that missed Tiers 1a/1b, only when score >= 0.85 (inclusive), and only when Shannon char-entropy of the normalized mention >= 1.5 bits. Below-gate or below-threshold mentions go to unresolved."
+    test: "packages/cairn-engine/tests/unit/test_resolve.py::test_fuzzy_threshold_and_entropy_gate"
+    test_provenance: "execution_derived"
+    execution_oracle: "golden_fixture: typo above threshold resolves; low-entropy short string skips fuzzy"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 4
+
+  - name: "ambiguity_returns_all_candidates"
+    requirement: "A surface form mapping to 2+ canonical IDs returns ALL candidates (deterministic order: confidence desc, then canonical_id asc). The resolver never silently picks one."
+    test: "packages/cairn-engine/tests/unit/test_resolve.py::test_ambiguous_surface_returns_all_candidates"
+    test_provenance: "execution_derived"
+    execution_oracle: "golden_fixture: alias 'user' declared on two entities"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 3
+
+  - name: "no_autodetected_accelerators"
+    requirement: "The default path uses ONLY the stdlib. Optional accelerators (e.g. rapidfuzz) are NEVER auto-detected/imported implicitly — output must not depend on what happens to be installed. (Explicit opt-in config may add them later.)"
+    test: "packages/cairn-engine/tests/unit/test_resolve.py::test_no_third_party_imports_on_default_path"
+    test_provenance: "execution_derived"
+    execution_oracle: "property_test: import cairn.entity.resolve with sys.modules probe — no non-stdlib imports"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 2
+
+  - name: "closed_world_never_synthesizes"
+    requirement: "A miss returns the surface form in `unresolved` — the resolver NEVER fabricates, guesses, or synthesizes a canonical_id not present in the table (negation-as-failure, TH-5). This binds the opt-in Tier-4 arbiter too: it may only SELECT among candidates cairn presents; an answer outside the candidate set is ignored (pick, never mint), and an invalid pick or abstention falls through to unresolved."
+    test: "packages/cairn-engine/tests/unit/test_resolve.py::test_miss_goes_to_unresolved_never_synthesized"
+    test_provenance: "execution_derived"
+    execution_oracle: "property_test: every returned canonical_id is a member of the table"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 1
+
+  - name: "byte_stable_zero_llm_zero_network"
+    requirement: "Same (query, table, config) -> identical output across repeated runs and process restarts (no dict-order, set-order, or hash-seed dependence). The DEFAULT path (config.arbiter=None) makes zero LLM calls and zero network calls — resolution works with sockets disabled. Tier 4 is a caller-supplied callable (ArbiterFn), opt-in, consulted ONLY when 2+ distinct candidates land in arbiter_band [0.70, 0.85) (pooled across fuzzy + semantic); exact-tier hits are never arbitrated; cairn itself never imports an SDK or calls an API. Enabling the arbiter narrows the byte-stability guarantee to the callable's own determinism — documented, caller's choice."
+    test: "packages/cairn-engine/tests/unit/test_resolve.py::test_byte_stable_and_offline"
+    test_provenance: "execution_derived"
+    execution_oracle: "property_test: repeated invocation equality + socket.socket monkeypatched to raise"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 1
+
+constraint_satisfiability:
+  conflicts_checked: true
+  known_tensions:
+    - between: ["fuzzy_tier_thresholded_and_entropy_gated", "byte_stable_zero_llm_zero_network"]
+      resolution: "Fuzzy uses difflib (stdlib, deterministic) — no floating nondeterminism sources; threshold comparison is on a plain float from SequenceMatcher.ratio()."
+    - between: ["gazetteer_scan_longest_match_deterministic", "closed_world_never_synthesizes"]
+      resolution: "Scan only matches table aliases by construction — it cannot produce an unknown ID. Free-text scan produces no `unresolved` entries (unknown-mention detection is build-time NER territory, documented); `unresolved` fills from explicit `mentions`."
+  simultaneous_satisfaction: "All satisfiable: single stdlib-only code path, sorted/tuple-based data structures, closed-world lookups."
+  joint_satisfaction_test: "packages/cairn-engine/tests/unit/test_resolve.py::test_joint_all_constraints_on_one_resolve"
+
+rationale:
+  decision: "Gazetteer-scan detection + cheap-first cascade against a frozen in-memory table; pure stdlib on the default path."
+  reasoning: "OP-28 cascade (exact -> fuzzy first two tiers); TH-1 canonicalization (resolution = map to class representative); TH-5 CWA (miss = unresolved, never invented). Auto-detecting optional accelerators would make output environment-dependent, silently violating determinism — hence explicit-opt-in-only."
+  evidence: "docs/research/tools/ENTITY_RELATIONSHIP_RESOLUTION_RESEARCH_2026.md §5 (tiers, thresholds, entropy gate); foundations/CANONICALIZATION_EQUIVALENCE_CLASSES_RESEARCH_2026.md; foundations/CLOSED_WORLD_RELATIONAL_MODEL_RESEARCH_2026.md"
+  date: "2026-07-11"
+  stakeholder: "Maintainer"
+
+alternatives:
+  - name: "Auto-detect rapidfuzz when installed"
+    rejected_because: "Output would depend on the environment — silently violates byte-stability across machines. Accelerators must be explicit opt-in config."
+    date_tested: "2026-07-11"
+  - name: "NER-based mention detection on the hot path"
+    rejected_because: "Model-dependent, heavier, and unnecessary under CWA — only table aliases can resolve anyway; unknown-mention discovery is build-time (OP-35)."
+    date_tested: "2026-07-11"
+
+risks:
+  - condition: "Normalization collisions merge distinct aliases (different entities normalize to the same string)."
+    action: "Collisions route to the ambiguity path — all candidates returned, never a silent pick."
+    monitor: "test_ambiguous_surface_returns_all_candidates"
+    severity: "medium"
+  - condition: "Pure-Python fuzzy is too slow for large alias tables."
+    action: "Acceptable for 0.1 (in-memory, <5k aliases). Explicit opt-in rapidfuzz path is future work; never auto-detected."
+    monitor: "benchmark in Phase 4"
+    severity: "low"
+
+# Rule 4 stress-test (pre-implementation adversarial probe) — folded in:
+stress_test_notes:
+  edge_cases_covered:
+    - "Nested/overlapping aliases: 'payment retry policy' contains 'payment' -> longest wins (C: scan)"
+    - "Unicode compat forms: fullwidth/ligature chars normalize to ASCII via NFKC (C: normalization)"
+    - "Empty query / empty mentions -> ([], []) without error"
+    - "Alias occurring twice in a query -> deduped to one (surface, canonical) pair"
+    - "Low-entropy mention ('ai') -> exact/normalized still work; only FUZZY is gated"
+    - "Threshold boundary: score == 0.85 resolves (inclusive)"
+    - "Normalization collision: two different aliases normalizing to the same string on different entities -> ambiguity path (all candidates returned)"
+  deliberately_out_of_scope:
+    - "Unknown-mention detection in free text (build-time NER, OP-35)"
+    - "Tiers 3-4 (embedding, LLM arbiter)"
+    - "Persistence (YAML/SQLite adapters — M1.3 proper)"
+
+implementation:
+  current: "authored alongside this intent (segmented per IVD Rule 1)"
+  version: 1
+  tests: "packages/cairn-engine/tests/unit/test_resolve.py"
+  documentation: "module docstrings; ROADMAP M1.2"
+  segments:
+    - "S1: normalize.py — normalize/tokenize/entropy (constraint: normalization)"
+    - "S2: adapters/memory.py — InMemoryAliasTable + freeze (constraints: closed-world groundwork)"
+    - "S3: resolve.py cascade — Tier 1a/1b + fuzzy w/ gate (constraints: fuzzy, no-autodetect)"
+    - "S4: scan + public API + ambiguity ordering (constraints: scan, ambiguity, closed-world, byte-stable)"
+
+verification:
+  status: "tests authored with implementation; run under python3.11 stdlib-only"
+  test_cases:
+    - name: "joint"
+      description: "One resolve() call satisfying all seven constraints simultaneously"
+      input: {query: "does the Payment Retry Policy affect my Schwab account?", mentions_also_tested: true}
+      expected_output: {all_ids_in_table: true, deterministic: true, offline: true}
+      validates_constraint: "ALL (joint)"
+
+changelog:
+  - version: "0.1.3"
+    date: "2026-07-11"
+    change: "Review fixes (F2/F3/F10): the Tier-4 gate is now BAND-ONLY per OP-28 — exact-tier ambiguity (confidence 1.0) is never arbitrated (ambiguity_returns_all_candidates holds unconditionally); the arbiter judges the POOLED fuzzy+semantic candidates in [0.70, 0.85) and requires 2+ distinct candidates (genuine ambiguity); Tier 3 semantic runs BEFORE any arbitration (LLM is last resort, not mid-cascade). Entropy-gated mentions go to unresolved, not to the arbiter (constrained-choice has no candidates to present) — deliberate deviation from OP-28's 'route to exact or LLM' wording, recorded here. Import-purity test extended to ban importlib/__import__."
+    reason: "Fresh-eyes review found the gate wider than the research pattern it cites; narrowed to the evidence."
+  - version: "0.1.2"
+    date: "2026-07-11"
+    change: "Tier 4 implemented: opt-in LLM arbiter as a caller-supplied ArbiterFn (ResolverConfig.arbiter). Fires ONLY on 2+ exact-candidate ambiguity or fuzzy in arbiter_band [0.70, 0.85) — the Fellegi-Sunter possible-link zone. Constrained choice: the arbiter picks among presented candidates; out-of-set answers are ignored, abstain -> unresolved. Constraints closed_world_never_synthesizes and byte_stable_zero_llm_zero_network extended to bind the arbiter; default path unchanged (zero LLM). Tier 3 (embedding) remains future opt-in work."
+    reason: "Completes the OP-28 cascade shape ('LLM as arbiter of last resort, <5%') without touching the default path's guarantees — same callable boundary as authoring extractors."
+  - version: "0.1.1"
+    date: "2026-07-11"
+    change: "Fuzzy metric corrected: token-set ratio -> token-SORT ratio. Discovered empirically (IVD Rule 5): the constraint test caught token-set scoring 1.0 for subset containment ('payment' alias vs 'Payment Retry Polcy' mention), letting short aliases outrank the intended entity. Token-sort compares full sorted-token strings: typo-tolerant, no subset freebie."
+    reason: "Rule 5 empirical refinement — the intent assumed token-set (per the research's RapidFuzz reference, which targets near-identical-name dedup); resolution needs stricter semantics."
+  - version: "0.1.0"
+    date: "2026-07-11"
+    change: "Initial module intent for hot-path resolution (M1.2) + in-memory lookup slice of M1.3; 7 constraints, critical-last; stress-test notes folded in."
+    reason: "IVD Rule 1 — intent before implementation; first vertical slice of the entity engine."

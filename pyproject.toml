@@ -1,0 +1,44 @@
+# Cairn — monorepo workspace root (uv workspace)
+# Two published packages under packages/ (import name in parentheses):
+#   cairn-engine     (cairn_engine)    — the deterministic entity / world-model engine (ships first)
+#   cairn-retrieval  (cairn_retrieval) — the agent-retrieval layer on top (staggered, 0.x until proven)
+# The brand is "Cairn"; the distribution is "cairn-engine" because "cairn" was
+# already taken on PyPI.
+#
+# Setup (run by the maintainer — never committed installs):
+#   uv sync --all-packages
+#   uv run pytest
+
+[project]
+name = "cairn-workspace"
+version = "0"
+description = "Cairn monorepo workspace (not published)."
+requires-python = ">=3.11"
+
+[tool.uv.workspace]
+members = ["packages/cairn-engine", "packages/cairn-retrieval"]
+
+[tool.uv.sources]
+cairn-engine = { workspace = true }
+cairn-retrieval = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "mypy>=1.10",
+    "ruff>=0.5",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["packages/cairn-engine/tests", "packages/cairn-retrieval/tests"]
+addopts = "--import-mode=importlib"
+consider_namespace_packages = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true

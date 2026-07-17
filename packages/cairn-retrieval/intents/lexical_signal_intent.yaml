@@ -1,0 +1,135 @@
+# ==============================================================================
+# cairn-retrieval — Module Intent: lexical signal (M3.2)
+# ==============================================================================
+# License: MIT · Copyright (c) 2026 Leo Celis · https://ivdframework.dev
+# Parent: ../../../cairn_system_intent.yaml (v0.2.1)
+# Patterns: patterns_retrieval_knowledge.yaml — OP-30 (lexical signal: two-mode
+#           scan + index), OP-32 (feeds RRF fusion)
+# ==============================================================================
+
+scope:
+  level: "module"
+  type: "feature"
+  granularity: "fine"
+
+metadata:
+  feature_id: "cairn_retrieval_lexical_signal"
+  category: "agent_infrastructure"
+  tags: ["lexical", "bm25", "scan", "grep", "deterministic", "zero-dep"]
+  status: "in_progress"
+  introduced_version: "0.0.1"
+
+intent:
+  summary: >
+    The lexical retrieval signal (OP-30), two modes under one module: an INDEX
+    (BM25-ranked, 'which docs are most about these terms') and a SCAN (exact /
+    regex match positions, 'where does this token appear', always fresh, no
+    index). Both are zero-LLM, offline, deterministic, and stdlib-only — they
+    feed the fusion layer (M3.4) alongside the semantic and graph signals.
+  goal: |
+    OP-30 names ripgrep (scan) and SQLite-FTS5 / Tantivy / bm25s (index) as the
+    engines. Those are external binaries / compile-time-optional / added deps —
+    incompatible with cairn's SHIPPING invariants (zero runtime deps, byte-stable
+    determinism; FTS5's BM25 tie-break + tokenizer vary by SQLite build). So the
+    DEFAULT that ships is a pure-Python BM25 index and a pure-Python scan; the
+    named engines are the documented opt-in ACCELERATION ladder (a faster drop-in
+    with identical semantics), not the default path.
+
+    Deliverables:
+      1. LexicalIndex.from_documents({doc_id: text}) -> freeze -> search(query,
+         *, top_k) -> list[LexicalHit(doc_id, score)]. BM25 (k1=1.2, b=0.75),
+         Lucene-style non-negative idf, sorted (score desc, doc_id asc).
+      2. scan(query, documents, *, regex=False) -> list[ScanMatch(doc_id,
+         line_no, line)] — exact substring or regex, over the live input (no
+         index, always fresh), no ranking.
+    Deterministic tokenization; closed world (no match -> empty, never fabricated).
+  success_metric: "All constraint tests pass under the project venv (python 3.11), stdlib-only, byte-stable; BM25 golden ranking exact; zero LLM/network/added-dep."
+  stakeholders:
+    - "M3.4 fusion (lexical is one of the fused signals via RRF)"
+    - "agents needing exact symbol/error-string/path matches (scan mode)"
+
+design_decisions:
+  default_is_pure_python_bm25:
+    decision: "The shipping default LexicalIndex is a pure-Python BM25 (k1=1.2, b=0.75). SQLite FTS5 / Tantivy / bm25s / ripgrep are documented opt-in accelerators, not imported by default."
+    rationale: "Guarantees zero-dep + full determinism control (byte-stable idf/tie-break). FTS5 is compile-time optional and its ranking internals vary by SQLite version — a determinism risk the shipping default must not carry (mirrors the no-auto-detected-accelerators decision)."
+  idf_is_non_negative:
+    decision: "idf(t) = ln(1 + (N - df + 0.5)/(df + 0.5))  (Lucene BM25 variant) — always >= 0."
+    rationale: "The classic Robertson idf goes negative for terms in >half the docs, which can invert rankings and surprise callers. The Lucene variant is monotonic and non-negative; deterministic."
+  scan_is_pure_python:
+    decision: "scan() is a pure-Python exact/regex matcher over caller-provided documents; ripgrep (rg binary) is the drop-in accelerator with the same semantics. cairn spawns no subprocess."
+    rationale: "The value of rg is speed on a huge tree; the SEMANTICS (match positions) are what cairn owns. A default that shells out to an external binary would break zero-setup + determinism."
+
+interface:
+  type: "library"
+  tools:
+    - name: "LexicalIndex"
+      description: "from_documents -> freeze -> search(query, *, top_k=10) -> list[LexicalHit]. BM25-ranked, deterministic."
+      returns: "LexicalIndex / list[LexicalHit]"
+      test: "packages/cairn-retrieval/tests/unit/test_lexical.py"
+    - name: "scan"
+      description: "scan(query, documents, *, regex=False) -> list[ScanMatch(doc_id, line_no, line)]. Exact/regex, fresh, unranked."
+      returns: "list[ScanMatch]"
+      test: "packages/cairn-retrieval/tests/unit/test_lexical.py::test_scan_mode"
+
+constraints:
+  - id: "C-LEX-1"
+    statement: "BM25 ranking: search() scores each doc by sum over query terms of idf(t)·tf·(k1+1)/(tf + k1·(1 − b + b·dl/avgdl)); a doc with higher term frequency for a query term outranks one with lower tf; a term appearing in every doc contributes idf≈0. Hand-computed golden order matches."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_lexical.py::test_bm25_ranking"
+    test_provenance: "human_authored"
+    execution_oracle:
+      type: "golden_fixture"
+      note: "3-doc corpus, one query term; tf and idf hand-computed; exact ordered doc_ids + top score asserted."
+
+  - id: "C-LEX-2"
+    statement: "Length normalization (b=0.75): with equal raw term frequency, the SHORTER document scores higher than the longer one (dl/avgdl penalty). Setting b=0 removes the penalty (equal scores)."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_lexical.py::test_length_normalization"
+    test_provenance: "human_authored"
+
+  - id: "C-LEX-3"
+    statement: "Deterministic + closed world: results are sorted (score desc, then doc_id asc) so ties are stable; top_k caps the list; a query whose terms match no document returns [] (never a fabricated hit). Byte-stable across runs."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_lexical.py::test_determinism_and_miss"
+    test_provenance: "human_authored"
+
+  - id: "C-LEX-4"
+    statement: "scan mode: scan(query, documents) returns ScanMatch(doc_id, line_no, line) for every line containing the exact substring (or regex when regex=True), over the live documents (no index build), unranked, in (doc_id, line_no) order. No match -> []. Invalid regex raises re.error."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_lexical.py::test_scan_mode"
+    test_provenance: "human_authored"
+
+  # CRITICAL, LAST — the SACRED no-auto-accelerator / zero-dep invariant.
+  - id: "C-LEX-5"
+    statement: "The module imports nothing outside the stdlib + cairn_retrieval: no search library (tantivy, bm25s, rank_bm25, whoosh), no fuzzy lib (rapidfuzz), no LLM/embedding SDK, no network (requests/httpx), no wall clock. It spawns no subprocess. Output depends only on inputs, not on what happens to be installed. Byte-stable."
+    assumption_status: "KNOWN"
+    conflict_prone: true
+    anti_pattern: "`import tantivy` / `import bm25s` / `subprocess.run(['rg', ...])` in the default path 'for speed'. That makes output depend on an optional install and breaks zero-dep + determinism. Accelerators are opt-in drop-ins with identical semantics, wired by the caller."
+    test: "packages/cairn-retrieval/tests/unit/test_lexical.py::test_stdlib_only_byte_stable"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      type: "differential_test"
+      note: "Static-scan the module for banned imports + subprocess (assert none); build + search twice and assert identical hits."
+
+constraint_satisfiability:
+  count: 5
+  joint_satisfaction_test: "packages/cairn-retrieval/tests/unit/test_lexical.py::test_joint_lexical"
+  joint_note: >
+    One test builds a small corpus, asserts BM25 ranked order with length
+    normalization (C-1,C-2), a stable tie-break + a miss (C-3), a scan over the
+    same corpus (C-4), all stdlib-only + byte-stable (C-5).
+  conflicts_checked: >
+    C-1 (BM25 ranked) vs C-4 (scan unranked): no conflict — separate modes with
+    separate outputs. C-2 (length norm) vs C-3 (determinism): consistent —
+    normalization is a fixed function of doc length, fully deterministic.
+
+non_goals:
+  - "Shipping ripgrep / FTS5 / Tantivy / bm25s (opt-in accelerators; see C-LEX-5)."
+  - "Semantic / embedding scoring (that is M3.3)."
+  - "Query expansion, stemming, stopword removal beyond simple tokenization (kept minimal + deterministic)."
+  - "Fusion with other signals (that is M3.4 / OP-32)."
+
+changelog:
+  - version: "0.1.0"
+    date: "2026-07-12"
+    change: "Initial intent for M3.2 lexical signal. Pure-Python BM25 index (k1=1.2,b=0.75, non-negative idf) + pure-Python scan (exact/regex). Zero-dep default; accelerators opt-in. 5 constraints, no-auto-accelerator keystone (conflict_prone) last; joint test defined."

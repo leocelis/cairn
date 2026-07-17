@@ -1,0 +1,126 @@
+# ==============================================================================
+# cairn-retrieval — Module Intent: signal fusion / RRF (M3.4)
+# ==============================================================================
+# License: MIT · Copyright (c) 2026 Leo Celis · https://ivdframework.dev
+# Parent: ../../../cairn_system_intent.yaml (v0.2.1)
+# Patterns: patterns_retrieval_knowledge.yaml — OP-32 (RRF constants + multi-signal
+#           combination, PRIMARY), OP-4 (retrieve->rerank pipeline), OP-3 (hybrid)
+# ==============================================================================
+
+scope:
+  level: "module"
+  type: "feature"
+  granularity: "fine"
+
+metadata:
+  feature_id: "cairn_retrieval_fusion"
+  category: "agent_infrastructure"
+  tags: ["rrf", "fusion", "reciprocal-rank", "hybrid", "deterministic"]
+  status: "in_progress"
+  introduced_version: "0.0.1"
+
+intent:
+  summary: >
+    Reciprocal Rank Fusion (RRF): merge the ranked lists from independent signals
+    (lexical M3.2, semantic M3.3, graph traversal) into ONE ranking by rank
+    position, not raw score — so BM25 and cosine (incomparable scales) combine
+    without normalization. k=1 (Graphiti/Zep) for cairn's short agent lists, not
+    the TREC k=60. Deterministic, stdlib-only.
+  goal: |
+    No single signal is consistently best (OP-3); hybrid wins. But BM25 scores and
+    cosine similarities live on incomparable scales — averaging them is meaningless.
+    RRF fuses by RANK: each signal votes 1/(k+rank) for the docs it ranked. This
+    module is the combine step between the signals and the assembler (M3.5).
+
+    Deliverables:
+      1. fuse(signals, *, k=1, top_k=10, weights=None) -> list[FusedHit(doc_id,
+         score, contributions)]. signals = {name: ranked [doc_id, ...]}. score(d)
+         = Σ_signals weight·1/(k + rank_0based(d)); a doc absent from a signal gets
+         0 from it. Deduplicated by doc_id, sorted (score desc, doc_id asc), top_k.
+    k=1 is the cairn default (short lists: rank-1 -> 1.0, rank-2 -> 0.5, ...);
+    k is configurable (use 60 only for 100+ item lists).
+  success_metric: "All constraint tests pass under the project venv (python 3.11), stdlib-only, byte-stable; RRF golden scores exact; no score normalization anywhere."
+  stakeholders:
+    - "M3.5 assembler (consumes the fused, deduped candidate list)"
+    - "M3.6 retrieve() (fusion is the combine stage)"
+
+design_decisions:
+  rank_not_score:
+    decision: "Fusion uses RANK POSITION only, never raw signal scores. Signals are passed as ordered lists of doc_ids; their score magnitudes never enter."
+    rationale: "OP-32: BM25 and cosine scales are incomparable; RRF's whole point is rank-based combination with no normalization. Consuming raw scores would reintroduce the normalization problem RRF exists to avoid."
+  k_equals_1_for_short_lists:
+    decision: "Default k=1 (contribution 1/(1+rank_0based) => rank-1=1.0, rank-2=0.5, rank-3=0.33). Configurable."
+    rationale: "OP-32: agent retrieval yields short lists (10-50/signal); k=60 (TREC) collapses the top-k into near-identical scores and loses the rank-1 signal. k=1 maximally differentiates by rank."
+  optional_per_signal_weights:
+    decision: "weights is an optional {signal: float}; default 1.0 each. A signal's contribution is multiplied by its weight."
+    rationale: "OP-32 signal_weighting — lets a corpus trust (say) lexical over semantic without changing the fusion math."
+
+interface:
+  type: "library"
+  tools:
+    - name: "fuse"
+      description: "fuse(signals, *, k=1, top_k=10, weights=None) -> list[FusedHit]. signals: Mapping[str, Sequence[str]] of ranked doc_ids."
+      returns: "list[FusedHit(doc_id, score, contributions)]"
+      test: "packages/cairn-retrieval/tests/unit/test_fusion.py"
+
+constraints:
+  - id: "C-FUSE-1"
+    statement: "RRF with k=1: a doc's score is the sum over signals of 1/(1 + rank_0based); rank-1 (index 0) contributes 1.0, rank-2 contributes 0.5, rank-3 contributes 1/3. A doc ranked by two signals sums both contributions. Hand-computed golden scores + order match."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_fusion.py::test_rrf_k1_scores"
+    test_provenance: "human_authored"
+    execution_oracle:
+      type: "golden_fixture"
+      note: "Two 3-item signals; a=1.0+0.5=1.5, b=0.5+1.0=1.5, c=1/3, d=1/3; order [a,b,c,d] (tie-break asc)."
+
+  - id: "C-FUSE-2"
+    statement: "A doc absent from a signal's list contributes 0 from that signal (no penalty, no error); a doc appearing in only one signal is scored solely by that signal."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_fusion.py::test_missing_signal_contributes_zero"
+    test_provenance: "human_authored"
+
+  - id: "C-FUSE-3"
+    statement: "Dedup + determinism: each doc appears once in the output; equal fused scores break ties by doc_id ascending; top_k caps the list; each FusedHit carries its per-signal (signal, rank, contribution) breakdown for audit. Byte-stable across runs."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_fusion.py::test_dedup_determinism_topk"
+    test_provenance: "human_authored"
+
+  - id: "C-FUSE-4"
+    statement: "Per-signal weights scale contributions (default 1.0); a higher weight on one signal raises the fused rank of the docs it favors. k is configurable — a larger k flattens rank differences (rank-1 vs rank-2 contributions converge)."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_fusion.py::test_weights_and_k"
+    test_provenance: "human_authored"
+
+  # CRITICAL, LAST — RRF is rank-only; no score normalization (the keystone).
+  - id: "C-FUSE-5"
+    statement: "NO SCORE NORMALIZATION and no raw-score input: fusion consumes only rank positions (ordered doc_id lists). The module imports only stdlib, makes no LLM/network/clock call, and is byte-stable. Signal score magnitudes never influence the result."
+    assumption_status: "KNOWN"
+    conflict_prone: true
+    anti_pattern: "min-max (or z-score) normalizing BM25 and cosine scores and averaging them. That is the trained-in 'combine scores' default; it is exactly what RRF rejects — the scales are incomparable and normalization is unstable across corpora. Fuse by rank only."
+    test: "packages/cairn-retrieval/tests/unit/test_fusion.py::test_rank_only_stdlib_byte_stable"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      type: "differential_test"
+      note: "Static-scan for network/LLM/clock imports (assert none); confirm fuse's signature takes ordered ids (no score arg); fuse twice and assert identical output."
+
+constraint_satisfiability:
+  count: 5
+  joint_satisfaction_test: "packages/cairn-retrieval/tests/unit/test_fusion.py::test_joint_fusion"
+  joint_note: >
+    One test fuses three signals (lexical/semantic/graph as ranked id lists),
+    asserting RRF k=1 scores (C-1), a doc present in only one signal (C-2), dedup +
+    tie-break + top_k (C-3), a weight shift (C-4), all rank-only + byte-stable (C-5).
+  conflicts_checked: >
+    C-1 (RRF sum) vs C-4 (weights): consistent — weight is a scalar multiplier on
+    each signal's 1/(k+rank) term. C-5 (rank-only) vs C-4 (weights): no conflict —
+    weights scale rank contributions, they are NOT raw signal scores.
+
+non_goals:
+  - "Cross-encoder reranking (OP-4 stage 2) — a later opt-in; M3.4 is the RRF combine only."
+  - "Candidate generation / 2x-limit fan-out (the caller sizes each signal's list before fusing)."
+  - "Score normalization of any kind (see C-FUSE-5 — RRF exists to avoid it)."
+
+changelog:
+  - version: "0.1.0"
+    date: "2026-07-12"
+    change: "Initial intent for M3.4 signal fusion. RRF k=1 (Graphiti/short-list), rank-only (no normalization), optional per-signal weights, dedup + deterministic tie-break, per-signal audit breakdown. 5 constraints, rank-only keystone (conflict_prone) last; joint test defined."

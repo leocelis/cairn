@@ -1,0 +1,134 @@
+# ==============================================================================
+# cairn-retrieval — Module Intent: semantic signal (M3.3, opt-in)
+# ==============================================================================
+# License: MIT · Copyright (c) 2026 Leo Celis · https://ivdframework.dev
+# Parent: ../../../cairn_system_intent.yaml (v0.2.1)
+# Patterns: patterns_retrieval_knowledge.yaml — OP-3 (hybrid retrieval, layer 3
+#           dense/semantic), OP-32 (feeds RRF fusion)
+# Reuses: cairn.EmbedderFn + cairn.cosine (the callable embedding boundary)
+# ==============================================================================
+
+scope:
+  level: "module"
+  type: "feature"
+  granularity: "fine"
+
+metadata:
+  feature_id: "cairn_retrieval_semantic_signal"
+  category: "agent_infrastructure"
+  tags: ["semantic", "dense-retrieval", "embeddings", "opt-in", "callable-boundary"]
+  status: "in_progress"
+  introduced_version: "0.0.1"
+
+intent:
+  summary: >
+    The dense/semantic retrieval signal (OP-3 layer 3): rank documents by cosine
+    similarity to the query in an embedding space. OPT-IN — the embedder enters
+    as a caller-supplied callable (cairn.EmbedderFn), exactly like the Tier-3
+    entity resolver. cairn imports no embedding SDK and makes no network call;
+    document vectors are computed once at build, the hot path embeds only the
+    query. Feeds RRF fusion (M3.4) beside the lexical and graph signals.
+  goal: |
+    No single retrieval method is consistently best; hybrid wins (OP-3). The
+    lexical signal (M3.2) catches exact terms; the semantic signal catches
+    "what is related to this concept" / cross-file relationships that share no
+    literal tokens. This module adds that layer WITHOUT breaking the zero-dep,
+    zero-network default: it is opt-in and the model is the caller's.
+
+    Deliverables:
+      1. SemanticIndex.from_documents({doc_id: text}, *, embedder) -> freeze
+         (embeds every doc once, offline).
+      2. search(query, *, embedder, top_k=10, floor=0.0) -> list[SemanticHit
+         (doc_id, score)] — cosine-ranked, sorted (score desc, doc_id asc),
+         floor-filtered; the hot path embeds ONLY the query.
+    Deterministic given a fixed embedder (the embedder is the caller's boundary);
+    closed world (empty corpus / nothing >= floor -> []).
+  success_metric: "All constraint tests pass under the project venv (python 3.11) with a fake deterministic embedder; cairn imports no embedding SDK / network; hot path embeds only the query; byte-stable given the embedder."
+  stakeholders:
+    - "M3.4 fusion (semantic is one fused signal via RRF)"
+    - "agents needing concept/relatedness retrieval beyond exact tokens"
+
+design_decisions:
+  embedder_is_caller_supplied:
+    decision: "The embedder is a cairn.EmbedderFn passed by the caller to build AND search. cairn never imports sentence-transformers / openai / any model; it never hits the network."
+    rationale: "Same SACRED callable boundary as the Tier-3 entity resolver and the LLM arbiter. Keeps the semantic tier opt-in and the default path zero-dep / offline / deterministic."
+  vectors_at_build_query_at_hot_path:
+    decision: "Document vectors are embedded ONCE at build (freeze). search() embeds only the single query string. Ranking reuses cairn.cosine."
+    rationale: "Mirrors EmbeddingIndex (entity Tier 3): amortize the corpus embedding offline; the hot path pays for one embedding, not N."
+  cosine_floor:
+    decision: "search() takes a `floor` (default 0.0); hits with cosine < floor are dropped. RRF fusion (M3.4) uses a 0.6 floor for the semantic sub-signal (OP-32) — passed in by the caller/fusion, not hard-coded here."
+
+interface:
+  type: "library"
+  tools:
+    - name: "SemanticIndex"
+      description: "from_documents(docs, *, embedder) -> freeze -> search(query, *, embedder, top_k=10, floor=0.0) -> list[SemanticHit]."
+      returns: "SemanticIndex / list[SemanticHit]"
+      test: "packages/cairn-retrieval/tests/unit/test_semantic.py"
+
+constraints:
+  - id: "C-SEM-1"
+    statement: "search ranks documents by cosine(query_vec, doc_vec), sorted (score desc, then doc_id asc for stable ties). A document whose embedding equals the query embedding scores cosine == 1.0 and ranks first."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_semantic.py::test_cosine_ranking"
+    test_provenance: "human_authored"
+    execution_oracle:
+      type: "golden_fixture"
+      note: "Fake embedder maps texts to fixed 2-D unit vectors; cosine order hand-computed."
+
+  - id: "C-SEM-2"
+    statement: "floor and top_k: hits with cosine < floor are excluded; the result is capped at top_k. floor=0.0 keeps all non-negative-cosine docs; a high floor can yield []."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_semantic.py::test_floor_and_topk"
+    test_provenance: "human_authored"
+
+  - id: "C-SEM-3"
+    statement: "Hot-path economy + closed world: build embeds every document exactly once; search calls the embedder exactly once (for the query) regardless of corpus size; an empty corpus or nothing >= floor returns []. No id is fabricated."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_semantic.py::test_embed_call_counts_and_miss"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      type: "differential_test"
+      note: "A counting fake embedder asserts build calls == N (one batch) and each search calls it once with [query]."
+
+  - id: "C-SEM-4"
+    statement: "Dimension integrity: a query vector whose dimension differs from the document vectors raises ValueError. NOTE (IVD Rule 5, empirical): cairn.cosine RETURNS 0.0 on a length mismatch (silent mis-score) — it does NOT raise — so SemanticIndex.search adds its OWN explicit dimension guard that raises, catching an embedder that is inconsistent between build and search."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_semantic.py::test_dimension_mismatch_raises"
+    test_provenance: "human_authored"
+
+  # CRITICAL, LAST — the SACRED opt-in callable boundary (no default embedding dep).
+  - id: "C-SEM-5"
+    statement: "cairn-retrieval's semantic module imports NO embedding/model SDK (sentence_transformers, openai, anthropic, torch, transformers) and makes NO network call (requests, httpx, urllib) and reads no wall clock. The embedder is the ONLY path by which vectors enter. Given a fixed embedder, output is byte-stable."
+    assumption_status: "KNOWN"
+    conflict_prone: true
+    anti_pattern: "`from sentence_transformers import SentenceTransformer` (or an openai embeddings call) as a default so 'search just works'. That makes the model a hard dep, adds a network call, and destroys the zero-dep/offline/deterministic default. The model is ALWAYS the caller's EmbedderFn."
+    test: "packages/cairn-retrieval/tests/unit/test_semantic.py::test_no_model_sdk_byte_stable"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      type: "differential_test"
+      note: "Static-scan the module for model/network/clock imports (assert none); search twice with a fixed fake embedder and assert identical hits."
+
+constraint_satisfiability:
+  count: 5
+  joint_satisfaction_test: "packages/cairn-retrieval/tests/unit/test_semantic.py::test_joint_semantic"
+  joint_note: >
+    One test builds from a small corpus with a deterministic fake embedder,
+    asserts cosine ranking (C-1) with floor + top_k (C-2), one query-embed call
+    (C-3), and byte-stability with no model SDK (C-5), all on the same index.
+  conflicts_checked: >
+    C-3 (embed query once) vs C-1 (rank all docs): no conflict — doc vectors are
+    precomputed at build, so ranking N docs needs only the one query embed. C-5
+    (no default model) vs the feature existing: consistent — the feature runs
+    entirely on the caller's embedder.
+
+non_goals:
+  - "Shipping / importing an embedding model or hitting an embeddings API (opt-in; caller's EmbedderFn only; see C-SEM-5)."
+  - "Approximate-NN indexing (HNSW/IVF) — M3.3 is exact cosine; ANN is a later opt-in for large corpora."
+  - "Chunking / windowing documents (the caller decides doc granularity)."
+  - "Fusion with lexical/graph (that is M3.4 / OP-32)."
+
+changelog:
+  - version: "0.1.0"
+    date: "2026-07-12"
+    change: "Initial intent for M3.3 semantic signal (opt-in). Cosine-ranked dense retrieval over caller-embedded documents; hot path embeds only the query; reuses cairn.EmbedderFn + cairn.cosine. 5 constraints, no-default-model keystone (conflict_prone) last; joint test defined."

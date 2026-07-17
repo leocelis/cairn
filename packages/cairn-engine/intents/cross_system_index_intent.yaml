@@ -1,0 +1,129 @@
+# ==============================================================================
+# Cairn — Module Intent: cross-system entity index (M2.4)
+# ==============================================================================
+# License: MIT · Copyright (c) 2026 Leo Celis · https://ivdframework.dev
+# Parent: ../../../cairn_system_intent.yaml (v0.2.1)
+# Patterns: patterns_entities.yaml — OP-28 (canonicalization), TH-1 (equivalence
+#           classes), TH-5 (closed world). Research finding: cross_system_entity_index.
+# ==============================================================================
+
+scope:
+  level: "module"
+  type: "feature"
+  granularity: "fine"
+
+metadata:
+  feature_id: "cairn_cross_system_index"
+  category: "agent_infrastructure"
+  tags: ["cross-system", "identity", "tool-arg-binding", "closed-world", "deterministic"]
+  status: "in_progress"
+  introduced_version: "0.2.0"
+
+intent:
+  summary: >
+    A unified index mapping ONE canonical entity to its many system-specific IDs
+    ({crm: "cus_42", slack: "C0299", github: "acme-inc"}), bidirectionally and
+    deterministically. Lets an agent resolve a mention to a canonical entity and
+    then bind the RIGHT external ID when it calls a tool against a given system.
+  goal: |
+    Failure this fixes (research finding cross_system_entity_index): tool systems
+    become cold silos — the right tool is selected but the arg binds to the WRONG
+    namespace ID (system-A id vs system-B id vs symbol for the same "Acme"). The
+    index makes canonical->system-id binding a lookup, not a guess.
+
+    Deliverables (a build->freeze->read-only index, like the alias table):
+      1. external_ids(canonical_id, *, system) -> tuple[str, ...]  (all ids the
+         entity has in that system; sorted; empty tuple on miss — never guessed)
+      2. bind(canonical_id, *, system) -> str | None  (the single id for a
+         tool-arg; None if the entity has none in that system; ValueError if the
+         entity has MORE than one there — an ambiguity the caller must resolve)
+      3. canonical_for(system, external_id) -> str | None  (reverse: which
+         canonical owns this system id; None on miss — closed world)
+      4. systems(canonical_id) -> tuple[str, ...]  (which systems this entity is
+         known in)
+    Build from explicit (canonical_id, system, external_id) entries or from
+    Entity.metadata["system_ids"] (a documented convention: {system: id | [ids]}).
+  success_metric: "All constraint tests pass under the project venv (python 3.11), stdlib-only, byte-stable; closed-world (no synthesized id) on every miss."
+  stakeholders:
+    - "agents doing multi-system tool calls (bind canonical -> correct system id at arg time)"
+    - "OQ-1 (unified entity index — partial)"
+
+design_decisions:
+  reverse_key_is_system_scoped:
+    decision: "The reverse index is keyed by (system, external_id), not external_id alone."
+    rationale: "The same external_id STRING can legitimately exist in two systems ('123' in CRM and in GitHub). Scoping by system keeps the reverse map unambiguous."
+  reverse_is_one_to_one:
+    decision: "Within a system, an external_id maps to AT MOST one canonical entity. A second canonical claiming the same (system, external_id) is a data error and raises at freeze."
+    rationale: "TH-1: canonicalization is an equivalence-class partition; a system id belonging to two canonicals means the two are actually the same entity (should be merged) — silently picking one corrupts binding."
+  forward_is_one_to_many:
+    decision: "One canonical MAY have multiple ids in the same system (e.g. after a TH-1 merge of two records that each had a system id). external_ids returns all (sorted); bind requires exactly one."
+    rationale: "Merges are real; losing a merged-away system id would break reverse lookups for that id. bind() surfaces the ambiguity instead of hiding it."
+
+interface:
+  type: "library"
+  tools:
+    - name: "CrossSystemIndex"
+      description: "Build (add / from_entries / from_entities) -> freeze() -> read-only bidirectional lookup. Frozen == deterministic boundary (like the alias table)."
+      returns: "CrossSystemIndex"
+      test: "packages/cairn-engine/tests/unit/test_cross_system.py"
+
+constraints:
+  - id: "C-XSYS-1"
+    statement: "Forward: external_ids(cid, system=s) returns exactly the ids entity cid has in system s, sorted, as a tuple; systems(cid) returns cid's systems sorted. Both return () on an unknown cid or unknown system (no error, no guess)."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-engine/tests/unit/test_cross_system.py::test_forward_lookup"
+    test_provenance: "human_authored"
+
+  - id: "C-XSYS-2"
+    statement: "Reverse: canonical_for(system=s, external_id=x) returns the canonical id that owns (s, x). The reverse key is (system, external_id) — the same external_id string in a different system does NOT collide."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-engine/tests/unit/test_cross_system.py::test_reverse_lookup_system_scoped"
+    test_provenance: "human_authored"
+
+  - id: "C-XSYS-3"
+    statement: "bind(cid, system=s): returns the single external id when cid has exactly one in s; returns None when cid has none in s; raises ValueError (ambiguous) when cid has 2+ in s. Built from Entity.metadata['system_ids'] accepting both a scalar id and a list of ids."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-engine/tests/unit/test_cross_system.py::test_bind_cardinality"
+    test_provenance: "human_authored"
+
+  - id: "C-XSYS-4"
+    statement: "Reverse one-to-one integrity: two DISTINCT canonical ids mapped to the same (system, external_id) raise ValueError at freeze. The same (cid, system, external_id) added twice is idempotent (no error)."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-engine/tests/unit/test_cross_system.py::test_reverse_collision_raises"
+    test_provenance: "human_authored"
+
+  # CRITICAL, LAST — the closed-world keystone (TH-5) + determinism.
+  - id: "C-XSYS-5"
+    statement: "CLOSED WORLD: every miss (unknown canonical, unknown system, unknown external id) returns () or None — NEVER a synthesized/guessed id. The index is byte-stable (deterministic order, no wall clock), read-only after freeze (mutation raises), and imports nothing outside stdlib."
+    assumption_status: "KNOWN"
+    conflict_prone: true
+    anti_pattern: "On a miss, fabricating a plausible external id (e.g. slugifying the label into 'acme-inc') so the tool call 'has something'. That is the exact hallucinated-binding failure cairn exists to remove — a miss must be an explicit None."
+    test: "packages/cairn-engine/tests/unit/test_cross_system.py::test_closed_world_and_byte_stable"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      type: "differential_test"
+      note: "Assert None/() on unknown inputs; freeze twice from the same entries and assert identical serialized state; static-check the module imports only stdlib."
+
+constraint_satisfiability:
+  count: 5
+  joint_satisfaction_test: "packages/cairn-engine/tests/unit/test_cross_system.py::test_joint_cross_system"
+  joint_note: >
+    One test: build from entities carrying system_ids incl. a TH-1 merge (one
+    canonical with two ids in one system), freeze, then forward (C-1), reverse
+    system-scoped (C-2), bind cardinality incl. the ambiguous case (C-3), and a
+    miss returning None (C-5) — all on the same frozen index, byte-stable.
+  conflicts_checked: >
+    C-3 (forward one-to-many) vs C-4 (reverse one-to-one): consistent — one
+    canonical may own several system ids (forward), but each system id is owned
+    by one canonical (reverse). C-5 (closed world) vs all: reinforces — misses
+    are None, never fabricated.
+
+non_goals:
+  - "Fetching from the external systems (this is an ID map, not a connector; the caller's tools do I/O)."
+  - "Fuzzy / semantic matching of external ids (exact identity only — resolution lives in resolve())."
+  - "Auto-detecting system_ids from arbitrary metadata shapes (only the documented system_ids convention)."
+
+changelog:
+  - version: "0.1.0"
+    date: "2026-07-12"
+    change: "Initial intent for M2.4 cross-system entity index. Bidirectional canonical<->{system ids}, closed-world (no synthesis), reverse one-to-one integrity at freeze, forward one-to-many for TH-1 merges, bind() with explicit ambiguity. 5 constraints, closed-world keystone (conflict_prone) last; joint test defined."

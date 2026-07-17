@@ -1,0 +1,155 @@
+# ==============================================================================
+# Cairn — Module Intent: core/entity semantic tier (Tier 3, opt-in)
+# ==============================================================================
+# License: MIT · Copyright (c) 2026 Leo Celis · https://ivdframework.dev
+# Parent: entity_resolution_intent.yaml (v0.1.2) — split out per IVD Rule 6
+#         (the resolution intent is at its 7-constraint budget).
+# Patterns: patterns_entities.yaml OP-28 (cascade Tier 3); charter constraint
+#           zero_llm_calls_on_hot_path (local discriminative models admissible,
+#           opt-in, never default).
+# ==============================================================================
+
+scope:
+  level: "module"
+  type: "feature"
+  granularity: "fine"
+
+metadata:
+  feature_id: "cairn_entity_semantic_tier"
+  category: "agent_infrastructure"
+  tags: ["embeddings", "semantic", "opt-in", "tier-3"]
+  status: "in_progress"
+  introduced_version: "0.1.0"
+
+intent:
+  summary: "Opt-in Tier 3: cosine similarity between the mention and PRECOMPUTED alias embeddings. The embedder is a caller-supplied callable; alias vectors are built offline; the hot path embeds only the mention. Thresholds mirror the fuzzy tier; the ambiguous band goes to the Tier-4 arbiter."
+  goal: |
+    Complete the OP-28 cascade: exact -> normalized -> fuzzy -> SEMANTIC -> LLM
+    arbiter. Covers semantic variants that string matching cannot ("my red car"
+    -> vehicle::red_car) without adding any dependency, network call, or model
+    to cairn itself.
+  success_metric: "All constraint tests pass with a hand-crafted deterministic fake embedder — no model, no network, hand-computable cosines."
+  stakeholders:
+    - "cairn users with corpora where surface variation is semantic, not typographic"
+
+interface:
+  type: "library"
+  tools:
+    - name: "EmbeddingIndex.build"
+      description: "BUILD TIME: embed every normalized alias once (one batch call) from the frozen table's normalized_entries()."
+      parameters:
+        - name: "normalized_entries"
+          type: "array"
+          required: true
+          description: "AliasTableAdapter.normalized_entries() — the frozen closed world"
+        - name: "embedder"
+          type: "callable"
+          required: true
+          description: "EmbedderFn: texts -> vectors; caller-owned (local model or API)"
+      returns: "EmbeddingIndex (read-only)"
+      test: "packages/cairn-engine/tests/unit/test_semantic.py"
+    - name: "resolve(..., config=ResolverConfig(semantic_index=..., embedder=...))"
+      description: "HOT PATH: Tier 3 fires only after Tiers 1-2 miss; embeds ONLY the mention."
+      parameters:
+        - name: "semantic_index"
+          type: "object"
+          required: false
+          description: "Precomputed EmbeddingIndex; None (default) disables the tier"
+      returns: "hits at tier 'embedding', or arbiter/miss per thresholds"
+      test: "packages/cairn-engine/tests/unit/test_semantic.py"
+
+# Critical constraints LAST.
+constraints:
+  - name: "aliases_embedded_at_build_time_only"
+    requirement: "EmbeddingIndex.build embeds every normalized alias exactly once (one batch call), offline. On the hot path the ONLY embedder invocation is for the mention being resolved — alias vectors are never recomputed at query time."
+    test: "packages/cairn-engine/tests/unit/test_semantic.py::test_aliases_embedded_once_at_build"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      property_test: "counting fake embedder: build calls it once with all aliases; N resolves add exactly N mention-embed calls"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 4
+
+  - name: "embedder_is_caller_supplied_never_default"
+    requirement: "The tier activates only when the caller passes BOTH semantic_index and embedder. The default path (both None) never imports an embedding SDK, never embeds, never touches the network. cairn contains no embedding model and no auto-detection."
+    test: "packages/cairn-engine/tests/unit/test_semantic.py::test_default_path_untouched"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      property_test: "spy embedder never called without opt-in; semantic.py imports stdlib only"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 3
+
+  - name: "thresholds_mirror_cascade_canon"
+    requirement: "cosine >= 0.85 (inclusive, semantic_threshold) resolves at tier 'embedding'; [0.70, 0.85) (arbiter_band) joins the pooled Tier-4 candidate set (arbitration requires 2+ distinct candidates), else misses; < 0.70 misses. Tier 3 fires ONLY after Tiers 1a/1b/2 all missed (cheap-first ordering)."
+    test: "packages/cairn-engine/tests/unit/test_semantic.py::test_thresholds_and_cascade_order"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      golden_fixture: "hand-crafted vectors with hand-computed cosines: 0.96 accepts; 0.75 -> arbiter; 0.50 misses"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 2
+
+  - name: "closed_world_and_determinism_scoped"
+    requirement: "The index is built from the frozen table's normalized_entries(), so it can only ever return ids that exist in the table (closed world survives the semantic tier). Given a deterministic embedder, output is byte-stable: ties merge and sort, no randomness added by cairn. Determinism is explicitly scoped to the embedder — documented, caller's choice."
+    test: "packages/cairn-engine/tests/unit/test_semantic.py::test_closed_world_and_byte_stable"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      property_test: "every returned id is in the table; repeated resolve repr-equal with the fake embedder"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 1
+
+constraint_satisfiability:
+  conflicts_checked: true
+  known_tensions:
+    - between: ["aliases_embedded_at_build_time_only", "thresholds_mirror_cascade_canon"]
+      resolution: "The mention embed is a hot-path cost by nature of the tier; it is opt-in and bounded to one embedder call per unresolved mention — never per alias."
+  simultaneous_satisfaction: "All satisfiable: one optional code path, gated by explicit config, reading a frozen index."
+  joint_satisfaction_test: "packages/cairn-engine/tests/unit/test_semantic.py::test_joint_semantic_tier"
+
+rationale:
+  decision: "Precomputed alias index + caller-supplied embedder + fuzzy-mirrored thresholds + arbiter handoff for the ambiguous band."
+  reasoning: "OP-28 Tier 3 ('semantic embedding similarity... only invoked when Tier 1-2 return no confident match'). The charter admits local discriminative models on the hot path as OPT-IN; the callable boundary keeps cairn dependency-free and network-free, same as extractors and the arbiter. Re-embedding aliases per query would be the classic hot-path-cost mistake (OP-29: reuse, never re-embed)."
+  evidence: "tools/ENTITY_RELATIONSHIP_RESOLUTION_RESEARCH_2026.md §5.2 (tier gates, 0.70-0.85 band); context/EMBEDDING_SIMILARITY_THRESHOLDS_RESEARCH_2026.md; charter zero_llm_calls_on_hot_path wording."
+  date: "2026-07-11"
+  stakeholder: "Maintainer"
+
+alternatives:
+  - name: "Bundle a small local embedding model as the default Tier 3"
+    rejected_because: "Breaks the zero-dependency core and makes output environment/model-version dependent by default. sentence-transformers stays an optional extra the CALLER wires in."
+    date_tested: "2026-07-11"
+  - name: "Embed aliases lazily at query time with caching"
+    rejected_because: "First-query latency spike, cache-state-dependent behavior, and a hidden hot-path embedding loop. Build-time batch is simpler and canon (OP-29)."
+    date_tested: "2026-07-11"
+
+risks:
+  - condition: "Callers pass a non-deterministic embedder (API with model drift) and expect byte-stability."
+    action: "Documented: determinism is scoped to the embedder. Local pinned-weight models give full stability; APIs do not."
+    monitor: "README / docstring wording"
+    severity: "low"
+
+implementation:
+  current: "authored alongside this intent"
+  version: 1
+  tests: "packages/cairn-engine/tests/unit/test_semantic.py"
+  documentation: "module docstrings; ROADMAP M1.2 note; CHANGELOG"
+
+verification:
+  status: "tests authored with implementation; fake deterministic embedder, hand-computed cosines"
+  test_cases:
+    - name: "joint"
+      description: "One resolve() with the semantic tier active satisfying all four constraints"
+      input: {mention: "my red car", index: "prebuilt from frozen table"}
+      expected_output: {tier: "embedding", ids_in_table: true, deterministic: true}
+      validates_constraint: "ALL (joint)"
+
+changelog:
+  - version: "0.1.1"
+    date: "2026-07-11"
+    change: "Review fixes (F3): added EmbeddingIndex.scored() so the resolver pools ALL ambiguous-band candidates (not just top ties) for the Tier-4 arbiter; band arbitration requires 2+ distinct pooled candidates; semantic tier always runs before any arbitration. Misconfiguration now raises TypeError (not assert — F8)."
+    reason: "The arbiter must judge the full genuine-ambiguity set, and asserts are compiled out under -O."
+  - version: "0.1.0"
+    date: "2026-07-11"
+    change: "Initial intent for the opt-in semantic tier (Tier 3): 4 constraints, critical-last. Split from entity_resolution_intent per IVD Rule 6 (7-constraint budget)."
+    reason: "Completes the OP-28 cascade with the same callable/opt-in boundary as Tiers 4 and authoring."

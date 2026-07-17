@@ -1,0 +1,142 @@
+# ==============================================================================
+# cairn-retrieval — Module Intent: concept-weighted link ranking (M3.0)
+# ==============================================================================
+# License: MIT · Copyright (c) 2026 Leo Celis · https://ivdframework.dev
+# Parent: ../../../cairn_system_intent.yaml (v0.2.1)
+# Patterns: patterns_retrieval_knowledge.yaml OP-32 (signal weighting / relevance).
+# Boundary note: this is RANKING (relevance), which lives in cairn-retrieval —
+#   NOT in the cairn entity engine, whose traverse() only does structural
+#   bounded closure. The engine supplies the graph; this weighs it.
+# ==============================================================================
+
+scope:
+  level: "module"
+  type: "feature"
+  granularity: "fine"
+
+metadata:
+  feature_id: "cairn_retrieval_link_ranking"
+  category: "agent_infrastructure"
+  tags: ["ranking", "idf", "link-recommendation", "deterministic"]
+  status: "in_progress"
+  introduced_version: "0.1.0"
+
+intent:
+  summary: "Rank document<->document links by TF-IDF COSINE similarity over shared concepts. IDF (concept specificity) down-weights ubiquitous concepts to 0; TF (per-document centrality) comes from the doc->concept edge WEIGHT (mention count). score = cosine(tfidf(A), tfidf(B)) in [0,1]. Pure graph structure (edges carry the weights): no text, no model, no network, deterministic."
+  goal: |
+    First real cairn-retrieval capability and the M1.6 link-quality upgrade.
+    concept_idf(entities) -> IDF per concept from document-frequency;
+    tfidf_vectors(entities) -> per-document sparse tf*idf concept vectors;
+    rank_links(entities) -> per document, its strongest sibling links by TF-IDF
+    cosine similarity. TF is the edge weight (Relation.weight, added to the model
+    as a structural build-time fact = mention count); IDF is log(N/df). This is
+    the textbook content-based related-documents measure.
+  success_metric: "IDF matches log(N/df) by hand; a ubiquitous-only overlap scores 0 (dropped); two documents with the same concepts but different TF ratios score < 1.0 vs identical-ratio = 1.0 (cosine hand-computed: (2,1)vs(1,2)=0.8)."
+  stakeholders:
+    - "cairn users building internal-linking / related-content over an entity graph (the WordPress use case)"
+
+interface:
+  type: "library"
+  tools:
+    - name: "concept_idf"
+      description: "concept_idf(entities, *, doc_type='document', concept_type='concept') -> dict[concept_id, float]. IDF(c) = log(N / df(c)); N = number of document entities, df(c) = documents mentioning c."
+      parameters:
+        - name: "entities"
+          type: "array"
+          required: true
+          description: "The frozen graph's entities (e.g. table.canonical_entities())"
+      returns: "dict of concept_id -> IDF weight (>= 0; 0 when the concept is in every document)"
+      test: "packages/cairn-retrieval/tests/unit/test_link_ranking.py"
+    - name: "rank_links"
+      description: "rank_links(entities, *, top_k=3, ...) -> list[LinkRecommendation]. For each document, its top_k sibling documents by summed IDF of shared concepts."
+      parameters:
+        - name: "top_k"
+          type: "integer"
+          required: false
+          description: "Max links emitted per source document (choice-overload cap)"
+      returns: "list[LinkRecommendation(source_id, target_id, score, shared)] — deterministic order"
+      test: "packages/cairn-retrieval/tests/unit/test_link_ranking.py"
+
+# Critical constraints LAST.
+constraints:
+  - name: "idf_is_log_n_over_df"
+    requirement: "concept_idf: IDF(c) = natural log(N / df(c)), where N = count of document-type entities and df(c) = count of DISTINCT documents that mention c (a doc->concept edge to a concept-type entity). A concept present in all N documents has IDF exactly 0.0. Empty document set -> empty result (no division)."
+    test: "packages/cairn-retrieval/tests/unit/test_link_ranking.py::test_idf_equals_log_n_over_df"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      golden_fixture: "N=3 docs: concept in 3 -> IDF 0.0; concept in 2 -> log(1.5)=0.4054651; concept in 1 -> log(3)"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 3
+
+  - name: "tfidf_cosine_ranking"
+    requirement: "Link score = cosine similarity of the two documents' TF-IDF concept vectors, in [0,1]. tf(c,d) = summed weight of d's edges to concept c (Relation.weight); tfidf(c,d) = tf*IDF(c). A concept with IDF 0 drops out of every vector, so a purely-ubiquitous overlap scores 0 and is dropped. Cosine is TF-direction sensitive: same concepts with different TF ratios score lower than identical ratios."
+    test: "packages/cairn-retrieval/tests/unit/test_link_ranking.py::test_rare_concepts_outrank_common"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      golden_fixture: "A&C share the rare concept -> identical 1-D vectors -> cosine 1.0; B shares only the ubiquitous concept -> zero vector -> dropped; (2,1)vs(1,2) tf ratios -> cosine 0.8"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 2
+
+  - name: "deterministic_closed_world_pure_graph"
+    requirement: "Output order is deterministic: per source, links sorted by score desc then target_id asc; only real document pairs from the graph appear (no synthesized ids). Pure stdlib (math only), no LLM, no network, no third-party deps; same entities -> byte-identical result across runs."
+    test: "packages/cairn-retrieval/tests/unit/test_link_ranking.py::test_deterministic_and_closed_world"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      property_test: "repeated calls repr-equal; every source/target id exists in the input; module imports stdlib only"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 1
+
+constraint_satisfiability:
+  conflicts_checked: true
+  known_tensions: []
+  simultaneous_satisfaction: "All satisfiable: one pure function over the entity list, sorted output, math-only."
+  joint_satisfaction_test: "packages/cairn-retrieval/tests/unit/test_link_ranking.py::test_joint_ranking"
+
+rationale:
+  decision: "IDF-only concept weighting over the graph; scoring lives in cairn-retrieval, not the entity engine."
+  reasoning: "OP-32 (signal weighting; 'channelized weights only after eval shows a signal over/under-contributes'). IDF is the canonical IR down-weight for ubiquitous terms; it fixes the observed failure (a concept in most posts links everything) using only document-frequency, which is a structural graph fact — no post bodies, no model. tf (per-post centrality) is deferred: it needs the text and only refines, not fixes, the problem."
+  evidence: "OP-32 in patterns_retrieval_knowledge.yaml; classic TF-IDF / BM25 IDF; the M1.6 WordPress demo where 'ai agents' (in ~half the posts) dominated link recommendations."
+  date: "2026-07-11"
+  stakeholder: "Maintainer"
+
+alternatives:
+  - name: "Compute TF in the ranking layer from raw post text at rank time"
+    rejected_because: "TF (mention count) is a structural property of the doc->concept edge — it belongs ON the edge (Relation.weight), set once at build time, so the ranking layer stays pure-graph (no re-reading bodies) and any consumer can reuse it."
+    date_tested: "2026-07-11"
+  - name: "Put the scoring in the entity engine's traverse()"
+    rejected_because: "Blurs the engine/retrieval boundary — traverse() does structural bounded closure with hop-distance as its only score (OP-34). Relevance ranking is cairn-retrieval's job."
+    date_tested: "2026-07-11"
+
+risks:
+  - condition: "A concept in exactly one document has high IDF but links nothing (no other doc shares it)."
+    action: "Harmless: it simply never appears in a shared set. Correct behavior."
+    monitor: "n/a"
+    severity: "low"
+
+implementation:
+  current: "authored alongside this intent"
+  version: 1
+  tests: "packages/cairn-retrieval/tests/unit/test_link_ranking.py"
+  documentation: "module docstrings; ROADMAP M3.0; example examples/wordpress_ranked_links.py"
+
+verification:
+  status: "tests authored with implementation; hand-computed IDF golden values"
+  test_cases:
+    - name: "joint"
+      description: "One rank_links call satisfying all three constraints on a hand-built graph"
+      input: {docs: 3, concepts: "one ubiquitous, one rare"}
+      expected_output: {rare_link_ranked_first: true, ubiquitous_only_link_dropped: true, deterministic: true}
+      validates_constraint: "ALL (joint)"
+
+changelog:
+  - version: "0.2.0"
+    date: "2026-07-11"
+    change: "Upgraded IDF-only -> full TF-IDF COSINE. Added Relation.weight to the entity model (structural edge weight = term frequency; round-trips in JSON, preserved on mirror edges, ignored by traverse). rank_links scores by cosine of tf*idf vectors in [0,1]; added tfidf_vectors(). New test test_tf_direction_changes_ranking pins cosine 0.8 vs 1.0."
+    reason: "Finish each feature polished, nothing half-done. TF is a real edge property; TF-IDF cosine is the canonical related-documents measure."
+  - version: "0.1.0"
+    date: "2026-07-11"
+    change: "Initial intent for concept-weighted link ranking (IDF): 3 constraints, critical-last. First real cairn-retrieval module. tf deferred; scoring kept out of the entity engine."
+    reason: "IVD Rule 1 — intent before implementation; the M1.6 demo surfaced ubiquitous-concept dominance as the concrete need."

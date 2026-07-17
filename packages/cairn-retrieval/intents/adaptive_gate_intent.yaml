@@ -1,0 +1,142 @@
+# ==============================================================================
+# cairn-retrieval — Module Intent: adaptive gate (M3.1)
+# ==============================================================================
+# License: MIT · Copyright (c) 2026 Leo Celis · https://ivdframework.dev
+# Parent: ../../../cairn_system_intent.yaml (v0.2.1)
+# Patterns: patterns_retrieval_knowledge.yaml — OP-33 (gate cost model, PRIMARY),
+#           OP-1 (7-test when-to-retrieve), OP-25 (RAG paradigm router)
+# ==============================================================================
+
+scope:
+  level: "module"
+  type: "feature"
+  granularity: "fine"
+
+metadata:
+  feature_id: "cairn_retrieval_adaptive_gate"
+  category: "agent_infrastructure"
+  tags: ["adaptive-gate", "when-to-retrieve", "routing", "llm-free", "deterministic"]
+  status: "in_progress"
+  introduced_version: "0.0.1"
+
+intent:
+  summary: >
+    A two-stage, LLM-free gate that runs before retrieval and returns a
+    RoutingDecision (strategy ∈ none | grep | semantic | graph | composite).
+    Stage 1 is a deterministic bypass (temporal/version markers, multi-entity
+    relational, private entity). Stage 2 is the CA-RAG utility cost function
+    (quality_prior − latency − token cost) over the strategy tiers. The gate
+    makes ZERO generative-LLM calls — using an LLM to decide whether to call one
+    is circular (OP-33).
+  goal: |
+    Always-on retrieval empirically HURTS (SRACG AAAI 2026: −2.6 to −3.6pp);
+    selective retrieval helps (+2.4 to +7.1pp). `strategy=none` is not a fallback
+    — it is the correct answer for 30-40% of agent queries. This gate makes the
+    skip decision (and the which-signal decision) deterministically, before any
+    signal runs, so the retrieval bill is only paid when it pays off.
+
+    Deliverables:
+      1. complexity(query) -> float in [0,1]  (CA-RAG: 0.6·wordlen/20 + 0.4·cues/3)
+      2. gate(query, *, entities=(), private_ids=frozenset(), tail_ids=frozenset(),
+              config=DEFAULT_GATE) -> RoutingDecision(strategy, stage, reason,
+              complexity, freshness_required, scores)
+      3. GateConfig — the calibratable weights/priors/marker sets (OP-33 defaults
+         baked in; the pattern says calibrate per corpus after OP-31 eval).
+    Entities arrive already resolved (canonical_ids, from cairn.resolve tier-1 —
+    the caller's fast path); private_ids / tail_ids are caller-supplied static
+    label sets built at ontology-authoring time (OP-35). Closed inputs, no magic.
+  success_metric: "All constraint tests pass under the project venv (python 3.11), stdlib-only, byte-stable; strategy=none reachable on a plain query; zero LLM/embedding calls."
+  stakeholders:
+    - "agents paying per-token for retrieval they may not need"
+    - "M3.6 retrieve() (the gate is its first stage)"
+    - "M3.4 fusion / M3.5 assembler (strategy selects which signals run)"
+
+design_decisions:
+  strategy_tiers:
+    decision: "strategy ∈ {none, grep, semantic, graph, composite}. none == direct LLM (skip retrieval). This mirrors OP-25 paradigms and OP-33 stage-2 output."
+  entities_are_pre_resolved:
+    decision: "The gate takes canonical_ids (already resolved by the caller via cairn tier-1), not raw text to resolve. private_ids/tail_ids are caller-supplied frozensets."
+    rationale: "Keeps the gate fast + deterministic + decoupled; resolution is Primitive B's job, popularity labels are authoring-time artifacts (OP-35). No hidden work."
+  utility_defaults_are_calibratable:
+    decision: "OP-33 defaults are baked into GateConfig: w_Q=0.6, w_L=0.2, w_C=0.2; quality_prior none=0.52/grep=0.64/semantic=0.73/graph=0.82/composite=0.86; tail_boost=0.15. Complexity lifts heavier tiers via a per-tier complexity_gain. All live in GateConfig — tunable, not hard-coded in the logic."
+    rationale: "OP-33: 'treat as defaults, calibrate per corpus'. The formula is fixed; the numbers are configuration."
+
+interface:
+  type: "library"
+  tools:
+    - name: "gate"
+      description: "gate(query, *, entities=(), private_ids=frozenset(), tail_ids=frozenset(), config=DEFAULT_GATE) -> RoutingDecision."
+      returns: "RoutingDecision(strategy, stage, reason, complexity, freshness_required, scores)"
+      test: "packages/cairn-retrieval/tests/unit/test_gate.py"
+    - name: "complexity"
+      description: "complexity(query) -> float in [0,1] per the CA-RAG formula."
+      returns: "float"
+      test: "packages/cairn-retrieval/tests/unit/test_gate.py::test_complexity_formula"
+
+constraints:
+  - id: "C-GATE-1"
+    statement: "Stage 1 bypass — a temporal marker ('today','current','latest','as of','now','recent','this week') or a version/release marker in the query returns stage=1, freshness_required=True, and a retrieve strategy (graph if an entity is present, else semantic). No scoring runs."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_gate.py::test_stage1_temporal"
+    test_provenance: "human_authored"
+
+  - id: "C-GATE-2"
+    statement: "Stage 1 bypass — ≥2 distinct resolved entities (or a relational cue with ≥1 entity) returns stage=1, strategy='composite'. A single resolved entity in private_ids returns stage=1, strategy='graph'. Documented precedence: multi-entity/relational > temporal > private."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_gate.py::test_stage1_relational_and_private"
+    test_provenance: "human_authored"
+
+  - id: "C-GATE-3"
+    statement: "complexity(q) == clip(0.6·(wordlen/20) + 0.4·(cues/3), 0, 1) where wordlen is the whitespace token count and cues counts relational keywords (compare, why, connect, between, history of, what changed, path, related). Hand-computed golden values match."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_gate.py::test_complexity_formula"
+    test_provenance: "human_authored"
+    execution_oracle:
+      type: "golden_fixture"
+      note: "Two queries with hand-computed wordlen/cues -> exact float asserted."
+
+  - id: "C-GATE-4"
+    statement: "Stage 2 cost function — utility(s) = w_Q·(quality_prior[s] + c·complexity_gain[s] + tail_boost·is_retrieve(s,tail)) − w_L·latency_cost[s] − w_C·token_cost[s]; argmax over the tiers (cheapest tier wins ties). A plain popular-entity query yields strategy='none' (strategy=none REACHABLE); the SAME query with the entity in tail_ids flips to a retrieve tier. scores is populated with every tier's utility."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_gate.py::test_stage2_none_reachable_and_tail_flip"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      type: "golden_fixture"
+      note: "Hand-computed: utility(none)=0.312 beats grep=0.3067 on a plain query; with tail_boost grep=0.3967 beats none. Argmax + tie-break asserted."
+
+  # CRITICAL, LAST — the OP-33 keystone: no LLM to decide whether to call an LLM.
+  - id: "C-GATE-5"
+    statement: "The gate makes ZERO generative-LLM and ZERO embedding calls and reads no wall clock; it is byte-stable (same inputs -> identical RoutingDecision) and imports nothing outside stdlib + cairn_retrieval. Freshness is decided by static markers, not by a clock."
+    assumption_status: "KNOWN"
+    conflict_prone: true
+    anti_pattern: "Calling a small LLM/classifier API to label the query's strategy 'because it's more accurate'. That is circular — it costs the very call the gate exists to avoid and injects non-determinism. The optional Adaptive-RAG classifier (OP-33) is a LOCAL trained model, never a generative-LLM API, and is out of scope for the default path."
+    test: "packages/cairn-retrieval/tests/unit/test_gate.py::test_no_llm_byte_stable"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      type: "differential_test"
+      note: "Static-scan the module for llm/openai/anthropic/requests/clock imports (assert none); run gate twice on the same inputs and assert identical decisions."
+
+constraint_satisfiability:
+  count: 5
+  joint_satisfaction_test: "packages/cairn-retrieval/tests/unit/test_gate.py::test_joint_gate"
+  joint_note: >
+    One test drives all stages on the same config: a temporal+entity query -> stage
+    1 graph + freshness (C-1), a two-entity query -> composite (C-2), a plain query
+    -> none via the utility argmax (C-3 complexity feeds C-4), the tail variant ->
+    grep (C-4), and asserts the whole run is byte-stable with no LLM (C-5).
+  conflicts_checked: >
+    C-1 (temporal -> retrieve) vs C-4 (none reachable): no conflict — temporal is a
+    Stage-1 bypass that never reaches Stage 2, so 'none' is only possible when no
+    freshness flag fired. C-5 (no clock) vs C-1 (freshness): consistent — freshness
+    is a STATIC marker match on the query text, not a wall-clock read.
+
+non_goals:
+  - "Running any retrieval signal (the gate only DECIDES; grep/semantic/graph are M3.2-M3.4)."
+  - "Resolving entities from raw text (caller passes resolved canonical_ids)."
+  - "The optional Adaptive-RAG trained classifier (a local model swap for Stage 2; not the default path)."
+  - "Per-corpus calibration of the weights (defaults ship; OP-31 eval calibrates later)."
+
+changelog:
+  - version: "0.1.0"
+    date: "2026-07-12"
+    change: "Initial intent for M3.1 adaptive gate. Two-stage LLM-free gate (deterministic bypass + CA-RAG utility), strategy=none reachable, tail-entity flip, complexity formula. 5 constraints, zero-LLM keystone (conflict_prone) last; joint test defined."

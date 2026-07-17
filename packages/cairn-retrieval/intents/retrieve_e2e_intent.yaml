@@ -1,0 +1,131 @@
+# ==============================================================================
+# cairn-retrieval — Module Intent: retrieve() end-to-end (M3.6)
+# ==============================================================================
+# License: MIT · Copyright (c) 2026 Leo Celis · https://ivdframework.dev
+# Parent: ../../../cairn_system_intent.yaml (v0.2.1)
+# Patterns: ALL of Phase 3 — OP-33 (gate), OP-30 (lexical), OP-3 (semantic),
+#           OP-34 (graph traverse), OP-32 (fusion), OP-29/FF-11 (assembler)
+# ==============================================================================
+
+scope:
+  level: "module"
+  type: "feature"
+  granularity: "coarse"
+
+metadata:
+  feature_id: "cairn_retrieval_retrieve_e2e"
+  category: "agent_infrastructure"
+  tags: ["retrieve", "orchestration", "end-to-end", "hot-path", "deterministic"]
+  status: "in_progress"
+  introduced_version: "0.0.1"
+
+intent:
+  summary: >
+    The single end-to-end entry point: resolve -> gate -> orchestrate the selected
+    signals -> fuse (RRF) -> assemble. One call turns a raw query into a minimal,
+    audited context package — or, when the gate says so, into NOTHING (skip). The
+    default path is deterministic and generative-LLM-free; embeddings run only
+    when the strategy selects the semantic signal AND an embedder is supplied.
+  goal: |
+    Phase 3 built the pieces (gate, lexical, semantic, graph, fusion, assembler).
+    M3.6 wires them into `RetrievalEngine.retrieve(query, *, budget)`:
+      1. resolve  — cairn.resolve(query, table) -> canonical entity ids (tier-1)
+      2. gate     — gate(query, entities, private_ids, tail_ids) -> RoutingDecision
+                    strategy == 'none' -> RETURN with no retrieval (the skip)
+      3. orchestrate per strategy:
+           grep/composite     -> lexical.search
+           semantic/composite -> semantic.search (needs embedder; cosine floor 0.6)
+           graph/composite    -> traverse from the resolved entities
+      4. fuse     — RRF over the signals' ranked doc-id lists
+      5. assemble — fused -> Candidates (content/tokens/embedding from the corpus,
+                    rel = fused score normalized to [0,1]) -> assemble(budget)
+    Returns RetrievalResult(decision, context, fused, entities). Missing/optional
+    signals are simply skipped (closed inputs; no magic).
+  success_metric: "All constraint tests pass under the project venv (python 3.11); a gate='none' query runs ZERO signals + ZERO embedder/LLM calls; a retrieve query yields a budget-respecting assembled package; whole pipeline byte-stable."
+  stakeholders:
+    - "agents — this is THE call they make (query in, minimal context out)"
+    - "the whole Phase 3 story — retrieve() is its integration test"
+
+design_decisions:
+  gate_short_circuits:
+    decision: "When the gate returns strategy='none', retrieve() returns immediately with context=None and fused=[] — no signal, no embedder, no fusion, no assembly."
+    rationale: "OP-33/SRACG: skip is the correct answer for 30-40% of queries and always-on retrieval hurts. The short-circuit is the point, not an optimization."
+  optional_signals_are_skipped:
+    decision: "Each signal runs only if (a) the strategy selects it AND (b) the engine was given that index. A strategy that selects semantic without an embedder simply contributes no semantic signal."
+    rationale: "Keeps the default path zero-dep/offline: an engine with only a lexical index and a graph never touches an embedder, even on a 'composite' route."
+  rel_from_fused_score:
+    decision: "The assembler's `rel` input is the fused RRF score normalized to [0,1] (divide by the top fused score). Not a raw signal score."
+    rationale: "Fusion already unified the incomparable signal scales into one rank-based score; normalizing THAT for MMR's Sim1 is legitimate (it is one scale), unlike averaging raw BM25 vs cosine."
+
+interface:
+  type: "library"
+  tools:
+    - name: "RetrievalEngine"
+      description: "Holds the pre-built table/corpus/indexes; .retrieve(query, *, budget, top_k) -> RetrievalResult."
+      returns: "RetrievalResult(decision, context, fused, entities)"
+      test: "packages/cairn-retrieval/tests/unit/test_retrieve.py"
+
+constraints:
+  - id: "C-RET-1"
+    statement: "Skip path: when the gate routes a query to strategy='none', retrieve() returns RetrievalResult with context=None and fused=[], having run NO signal (lexical/semantic/graph) — the resolved entities are still reported."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_retrieve.py::test_skip_path_runs_no_signals"
+    test_provenance: "human_authored"
+
+  - id: "C-RET-2"
+    statement: "Strategy orchestration: the fused result's contributing signals match the gate strategy — grep -> {lexical}; semantic -> {semantic}; graph -> {graph}; composite -> all AVAILABLE signals. A signal whose index/embedder is absent is skipped without error."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_retrieve.py::test_strategy_selects_signals"
+    test_provenance: "human_authored"
+
+  - id: "C-RET-3"
+    statement: "Entity-grounded graph signal: resolved canonical entities seed traverse; the graph signal's doc-ids come from those entities' bounded neighborhood (hop-ordered). An unresolved/unknown entity contributes no graph docs (closed world)."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_retrieve.py::test_graph_signal_entity_grounded"
+    test_provenance: "human_authored"
+
+  - id: "C-RET-4"
+    statement: "End-to-end package: for a retrieve strategy, fused candidates become an AssembledContext that respects `budget`, carries a manifest with provenance, and orders strongest-first (fold). Same inputs -> byte-identical RetrievalResult."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_retrieve.py::test_end_to_end_package"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      type: "differential_test"
+      note: "Build a full engine; run a composite query; assert budget respected + manifest present + byte-stable across two calls."
+
+  # CRITICAL, LAST — hot-path purity (the whole thesis).
+  - id: "C-RET-5"
+    statement: "Hot-path purity: the DEFAULT path makes ZERO generative-LLM calls and ZERO embedding calls. The embedder is invoked ONLY when the strategy selects the semantic signal and an embedder was supplied; a gate='none' or a lexical/graph route calls it zero times. The module imports no LLM/network SDK and reads no wall clock; retrieve() is byte-stable."
+    assumption_status: "KNOWN"
+    conflict_prone: true
+    anti_pattern: "Embedding the query (or calling an LLM reranker) unconditionally at the top of retrieve(), before the gate — so 'the semantic signal is ready'. That pays the exact cost the gate exists to avoid and injects non-determinism on every query, including the 30-40% that should skip."
+    test: "packages/cairn-retrieval/tests/unit/test_retrieve.py::test_hot_path_purity"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      type: "differential_test"
+      note: "Counting embedder; assert 0 calls on a 'none' route and on a lexical/graph route; assert exactly 1 (query) call on a semantic/composite route; static-scan for LLM/network/clock imports."
+
+constraint_satisfiability:
+  count: 5
+  joint_satisfaction_test: "packages/cairn-retrieval/tests/unit/test_retrieve.py::test_joint_retrieve"
+  joint_note: >
+    One test builds a full engine (table + lexical + semantic + graph + corpus) and
+    drives: a 'none' query (skip, C-1, 0 embed C-5), then a composite query
+    (all signals C-2, entity-grounded graph C-3, budgeted+audited package C-4,
+    exactly 1 embed C-5), asserting byte-stability throughout.
+  conflicts_checked: >
+    C-1 (skip) vs C-4 (package): mutually exclusive by strategy — 'none' yields no
+    package, a retrieve strategy yields one. C-5 (no embed on default) vs C-2
+    (semantic on composite): consistent — the embedder runs only on the semantic
+    branch, which is not the default/zero-dep path.
+
+non_goals:
+  - "Cross-encoder reranking between fusion and assembly (OP-4 stage 2; later opt-in)."
+  - "Generating the final answer (retrieve() emits CONTEXT; the model is the caller's)."
+  - "Tokenization / embedding of the corpus (the caller pre-builds indexes + corpus meta)."
+  - "Multi-hop iterative retrieval loops (single pass for 0.1)."
+
+changelog:
+  - version: "0.1.0"
+    date: "2026-07-12"
+    change: "Initial intent for M3.6 retrieve() end-to-end. resolve->gate->orchestrate->fuse->assemble; gate='none' short-circuit; optional signals skipped; hot-path purity (zero LLM/embed on default). 5 constraints, hot-path-purity keystone (conflict_prone) last; joint test defined."

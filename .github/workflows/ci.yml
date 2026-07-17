@@ -1,0 +1,36 @@
+# Cairn CI — the determinism gate (M1.5).
+# Every push runs lint + strict types + the full constraint-test suite,
+# including the byte-stability and offline (sockets-disabled) tests.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          pip install -r requirements-dev.txt
+          pip install -e packages/cairn-engine -e packages/cairn-retrieval
+      - name: Lint (ruff)
+        run: ruff check packages/ examples/
+      - name: Types (mypy strict)
+        run: mypy packages/cairn-engine/src/cairn_engine
+      - name: Tests (constraint suites + integration)
+        run: pytest -q
+      - name: Determinism smoke (demo byte-stability)
+        run: |
+          python examples/blog_graph_demo.py > run1.txt
+          python examples/blog_graph_demo.py > run2.txt
+          diff run1.txt run2.txt

@@ -1,0 +1,138 @@
+# ==============================================================================
+# Cairn — Module Intent: SQLite alias-table adapter (M2.2)
+# ==============================================================================
+# License: MIT · Copyright (c) 2026 Leo Celis · https://ivdframework.dev
+# Parent: ../../../cairn_system_intent.yaml (v0.2.1)
+# Patterns: patterns_entities.yaml OP-35 (serialization tiers: SQLite 500-50k);
+#           charter storage_agnostic_core (the second live backend that proves it).
+# ==============================================================================
+
+scope:
+  level: "module"
+  type: "feature"
+  granularity: "fine"
+
+metadata:
+  feature_id: "cairn_sqlite_alias_table"
+  category: "agent_infrastructure"
+  tags: ["adapter", "sqlite", "persistence", "storage-agnostic", "scale"]
+  status: "in_progress"
+  introduced_version: "0.1.0"
+
+intent:
+  summary: "A second live AliasTableAdapter backed by SQLite (stdlib sqlite3) — the concrete proof of storage_agnostic_core. Same Protocol, same behavior as the in-memory adapter (identical folding via adapters._build), but the frozen closed world persists in a .db file and reads are served by SQL queries, so a large corpus need not live in RAM to be resolved."
+  goal: |
+    Implement SqliteAliasTable satisfying the AliasTableAdapter Protocol
+    (lookup, add, merge, normalized_entries, has_id, has_record) plus
+    canonical_entities(). Build-time folding reuses adapters._build (Union-Find
+    fold + index) — the SAME algorithm the in-memory adapter uses, so results
+    are byte-identical across backends. Freeze writes the folded records + exact
+    + normalized indexes into SQLite tables; the hot path queries them.
+  success_metric: "A shared behavioral test suite runs against BOTH InMemoryAliasTable and SqliteAliasTable and passes identically. Reopening a persisted .db resolves without re-building. Zero third-party deps (sqlite3 is stdlib)."
+  stakeholders:
+    - "cairn users with 500-50k entities who need persistence + not loading everything into RAM"
+
+interface:
+  type: "library"
+  tools:
+    - name: "SqliteAliasTable"
+      description: "SqliteAliasTable(path=':memory:'); .add()/.merge() build-time; .freeze() writes tables; lookup/normalized_entries/has_id/has_record/canonical_entities read via SQL. from_entities(entities, path) convenience. open(path) reopens a frozen .db read-only."
+      parameters:
+        - name: "path"
+          type: "string"
+          required: false
+          description: "SQLite file path; ':memory:' (default) for ephemeral"
+      returns: "an AliasTableAdapter"
+      test: "packages/cairn-engine/tests/unit/test_sqlite_adapter.py"
+
+# Critical constraints LAST.
+constraints:
+  - name: "satisfies_protocol_same_behavior"
+    requirement: "SqliteAliasTable implements every AliasTableAdapter method (lookup, add, merge, normalized_entries, has_id, has_record) + canonical_entities(), and is a runtime AliasTableAdapter. For any set of entities + merges, its outputs are byte-identical to InMemoryAliasTable's — verified by a SHARED parametrized test suite exercising both."
+    test: "packages/cairn-engine/tests/unit/test_sqlite_adapter.py::test_matches_inmemory_behavior"
+    test_provenance: "differential_test"
+    execution_oracle:
+      differential_test: "run the same operations against InMemoryAliasTable and SqliteAliasTable; assert lookup / normalized_entries / has_id / has_record / canonical_entities are equal for a corpus with merges"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 4
+
+  - name: "folding_reuses_shared_build"
+    requirement: "Union-Find folding + index construction reuse adapters._build (fold_entities, build_indexes) — the SAME code path as in-memory. The SQLite adapter contains no duplicate folding logic; only storage of the frozen result differs."
+    test: "packages/cairn-engine/tests/unit/test_sqlite_adapter.py::test_merge_folds_like_inmemory"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      golden_fixture: "merge LLMs->LLM: representative absorbs the merged refs; merged id has_id False / has_record True — same as in-memory"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 3
+
+  - name: "persists_and_reopens_frozen"
+    requirement: "After freeze() to a file path, a fresh SqliteAliasTable.open(path) resolves the same corpus WITHOUT re-adding or re-freezing (persistence). A reopened table is read-only (add/merge/freeze raise)."
+    test: "packages/cairn-engine/tests/unit/test_sqlite_adapter.py::test_persist_and_reopen"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      property_test: "freeze to a temp .db; open() a new instance; lookup returns the same ids; add()/merge() raise"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 2
+
+  - name: "deterministic_stdlib_offline"
+    requirement: "Only python stdlib (sqlite3, json). Deterministic: lookups ORDER BY canonical_id, normalized_entries ORDER BY normalized then id; same corpus -> byte-identical outputs across runs and across a fresh reopen. No network; freeze must not be required to be re-run to read a persisted db. Freeze-before-read is enforced (lookup before freeze raises)."
+    test: "packages/cairn-engine/tests/unit/test_sqlite_adapter.py::test_deterministic_stdlib_freeze_gate"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      property_test: "repeated lookups repr-equal; module imports only sqlite3/json/stdlib; lookup before freeze raises"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 1
+
+constraint_satisfiability:
+  conflicts_checked: true
+  known_tensions:
+    - between: ["satisfies_protocol_same_behavior", "persists_and_reopens_frozen"]
+      resolution: "Build-time folding happens in memory (offline, batch) via adapters._build; only the FROZEN result is persisted and served from SQL — so behavior matches in-memory while gaining persistence."
+  simultaneous_satisfaction: "All satisfiable: shared folding + SQL-backed frozen storage, sorted queries, stdlib only."
+  joint_satisfaction_test: "packages/cairn-engine/tests/unit/test_sqlite_adapter.py::test_joint_sqlite_adapter"
+
+rationale:
+  decision: "SQLite-backed frozen store; build-time fold in memory via shared _build; reads via SQL."
+  reasoning: "The charter's storage_agnostic_core is only a claim until a second live backend exists; the review flagged 'Portability (>=2 backends): Not yet'. SQLite (stdlib) proves it with zero new dependencies and adds persistence + the ability to resolve a large corpus without holding every record in RAM (OP-35 serialization tier: SQLite for 500-50k). Reusing adapters._build guarantees identical behavior — the differential test is the proof."
+  evidence: "OP-35 serialization tiers; charter storage_agnostic_core + success_metric PORTABILITY; the fresh-eyes review (F-review) noting one backend only."
+  date: "2026-07-11"
+  stakeholder: "Maintainer"
+
+alternatives:
+  - name: "Persist entities to SQLite but load all into an in-memory index on open"
+    rejected_because: "Defeats the scale purpose — still holds everything in RAM. Reads should be served by SQL so a large corpus need not fit in memory."
+    date_tested: "2026-07-11"
+  - name: "Reimplement folding inside the SQLite adapter"
+    rejected_because: "Duplicated logic drifts. Shared adapters._build guarantees byte-identical behavior — the whole point of storage-agnosticism."
+    date_tested: "2026-07-11"
+
+risks:
+  - condition: "Very large corpus makes the in-memory build phase heavy."
+    action: "Acceptable: build is offline/batch (OP-35). Streaming build is future work; the read path already scales via SQL."
+    monitor: "Phase 4 benchmark"
+    severity: "low"
+
+implementation:
+  current: "authored alongside this intent"
+  version: 1
+  tests: "packages/cairn-engine/tests/unit/test_sqlite_adapter.py (+ shared suite in test_adapter_contract.py)"
+  documentation: "module docstrings; ROADMAP M2.2; CHANGELOG"
+
+verification:
+  status: "tests authored with implementation; differential vs in-memory"
+  test_cases:
+    - name: "joint"
+      description: "One SqliteAliasTable lifecycle satisfying all constraints, cross-checked vs in-memory"
+      input: {entities: "with a merge", persisted: true}
+      expected_output: {matches_inmemory: true, reopens: true, deterministic: true}
+      validates_constraint: "ALL (joint)"
+
+changelog:
+  - version: "0.1.0"
+    date: "2026-07-11"
+    change: "Initial intent for the SQLite alias-table adapter (M2.2): 4 constraints, critical-last. Second live backend proving storage_agnostic_core; folding reused from adapters._build (extracted from the in-memory adapter, no duplication)."
+    reason: "IVD Rule 1; the review flagged portability (>=2 backends) as unproven — this makes the storage-agnostic thesis concrete."

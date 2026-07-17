@@ -1,0 +1,84 @@
+<svg width="100%" viewBox="0 0 680 560" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>Cairn — architecture: where it sits in the context-building stack</title>
+<desc>A vertical stack: the agent/model on top consumes a ContextPackage; Cairn is the query-time decision, routing and assembly layer in the middle with four stages (adaptive gate, entity-first routing, signal orchestration, context assembler); storage backends are at the bottom, which Cairn routes over via adapters but never owns. Zero generative-LLM on the hot path.</desc>
+
+<defs>
+  <marker id="ar" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+    <path d="M0,0 L8,4 L0,8 z" fill="#888780"/>
+  </marker>
+  <marker id="arg" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+    <path d="M0,0 L8,4 L0,8 z" fill="#1D9E75"/>
+  </marker>
+</defs>
+
+<style>
+  text { font-family: system-ui, -apple-system, sans-serif; fill: #2C2C2A; }
+  .th  { font-size: 14px; font-weight: 600; }
+  .t   { font-size: 13px; font-weight: 400; }
+  .ts  { font-size: 11px; font-weight: 400; fill: #444441; }
+  .mono { font-family: ui-monospace, monospace; font-size: 10px; fill: #534AB7; }
+</style>
+
+<!-- agent / model -->
+<rect x="60" y="40" width="560" height="42" rx="8" fill="#D3D1C7" stroke="#B4B2A9" stroke-width="1"/>
+<text x="340" y="59" text-anchor="middle" class="th">agent / model</text>
+<text x="340" y="75" text-anchor="middle" class="ts">consumes the assembled context — does the reasoning</text>
+
+<!-- arrows between agent and Cairn -->
+<line x1="250" y1="82" x2="250" y2="120" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="236" y="104" text-anchor="end" class="ts">query ↓</text>
+<line x1="430" y1="120" x2="430" y2="82" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arg)"/>
+<text x="444" y="104" text-anchor="start" class="ts" fill="#0F6E56">ContextPackage ↑</text>
+
+<!-- Cairn outer border -->
+<rect x="48" y="120" width="584" height="300" rx="12" fill="none" stroke="#7F77DD" stroke-width="2"/>
+<text x="64" y="142" class="th" fill="#534AB7">Cairn — query-time decision · routing · assembly</text>
+<text x="616" y="142" text-anchor="end" class="ts" fill="#7F77DD">zero generative-LLM on hot path</text>
+
+<!-- A: adaptive gate -->
+<rect x="64" y="152" width="552" height="52" rx="8" fill="#EEEDFE" stroke="#AFA9EC" stroke-width="1"/>
+<text x="80" y="174" class="th" fill="#3C3489">A · adaptive gate</text>
+<text x="80" y="192" class="ts" fill="#534AB7">retrieve? · which signal? · none is valid</text>
+<text x="600" y="184" text-anchor="end" class="mono">OP-25 · FF-2/3</text>
+
+<!-- B: entity-first routing -->
+<rect x="64" y="210" width="552" height="52" rx="8" fill="#EEEDFE" stroke="#AFA9EC" stroke-width="1"/>
+<text x="80" y="232" class="th" fill="#3C3489">B · entity-first routing</text>
+<text x="80" y="250" class="ts" fill="#534AB7">mention → canonical id → relation closure</text>
+<text x="600" y="242" text-anchor="end" class="mono">OP-28</text>
+
+<!-- C: signal orchestration -->
+<rect x="64" y="268" width="552" height="52" rx="8" fill="#EEEDFE" stroke="#AFA9EC" stroke-width="1"/>
+<text x="80" y="290" class="th" fill="#3C3489">C · signal orchestration</text>
+<text x="80" y="308" class="ts" fill="#534AB7">grep | semantic | graph → RRF fuse</text>
+<text x="600" y="300" text-anchor="end" class="mono">OP-30 · OP-1</text>
+
+<!-- E: context assembler -->
+<rect x="64" y="326" width="552" height="52" rx="8" fill="#EEEDFE" stroke="#AFA9EC" stroke-width="1"/>
+<text x="80" y="348" class="th" fill="#3C3489">E · context assembler</text>
+<text x="80" y="366" class="ts" fill="#534AB7">budget → MMR → dedup → order → emit</text>
+<text x="600" y="358" text-anchor="end" class="mono">OP-29 · FF-11</text>
+
+<!-- adapter interface label -->
+<text x="340" y="406" text-anchor="middle" class="ts" fill="#534AB7">↕ adapter interface — Cairn routes over the store, never owns it</text>
+
+<!-- dashed arrows to/from backends -->
+<line x1="250" y1="420" x2="250" y2="452" stroke="#888780" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ar)"/>
+<line x1="430" y1="452" x2="430" y2="420" stroke="#888780" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ar)"/>
+
+<!-- storage backends -->
+<rect x="60" y="454" width="131" height="46" rx="8" fill="#D3D1C7" stroke="#B4B2A9" stroke-width="1"/>
+<text x="125" y="481" text-anchor="middle" class="t">files / grep</text>
+
+<rect x="203" y="454" width="131" height="46" rx="8" fill="#D3D1C7" stroke="#B4B2A9" stroke-width="1"/>
+<text x="268" y="481" text-anchor="middle" class="t">SQL DB</text>
+
+<rect x="346" y="454" width="131" height="46" rx="8" fill="#D3D1C7" stroke="#B4B2A9" stroke-width="1"/>
+<text x="411" y="481" text-anchor="middle" class="t">vector DB</text>
+
+<rect x="489" y="454" width="131" height="46" rx="8" fill="#D3D1C7" stroke="#B4B2A9" stroke-width="1"/>
+<text x="554" y="481" text-anchor="middle" class="t">graph DB</text>
+
+<!-- footer -->
+<text x="340" y="528" text-anchor="middle" class="ts" fill="#5F5E5A">build-time ingestion (chunk · embed · ontology authoring) is OFF the hot path — optional, offline, batched</text>
+</svg>

@@ -1,0 +1,186 @@
+# ==============================================================================
+# Cairn — Module Intent: bi-temporal state (M2.1)
+# ==============================================================================
+# License: MIT · Copyright (c) 2026 Leo Celis · https://ivdframework.dev
+# Parent: ../../../cairn_system_intent.yaml (v0.2.1)
+# Patterns: patterns_entities.yaml — TH-3 (Bitemporal State Model), OP-28
+#           (bi_temporal_model), OP-34 (traversal temporal filter), OP-35
+#           (four-column schema), TH-5 (CWA)
+# Resolves: OQ-4 (open-end interval sentinel — NULL vs +infinity)
+# ==============================================================================
+
+scope:
+  level: "module"
+  type: "feature"
+  granularity: "fine"
+
+metadata:
+  feature_id: "cairn_entity_bitemporal"
+  category: "agent_infrastructure"
+  tags: ["bitemporal", "valid-time", "transaction-time", "point-in-time", "audit", "deterministic"]
+  status: "in_progress"
+  introduced_version: "0.2.0"
+
+intent:
+  summary: >
+    Complete the bi-temporal model (TH-3): the valid-time axis
+    (valid_from/valid_until) already exists on Entity and Relation; add the
+    SECOND axis, transaction-time (known_from/known_until = when the system
+    learned the fact), plus a point-in-time query (as_at) over both axes and an
+    append-only supersession helper — all deterministic, wall-clock-free,
+    stdlib-only.
+  goal: |
+    Today a fact carries one time axis (valid-time): "when was this TRUE in the
+    world." That answers correctness but not audit — "what did the agent KNOW,
+    and when." A single axis conflates the two (TH-3). M2.1 adds transaction-time
+    so both questions are answerable and every correction is preserved, never
+    overwritten (append-only history = auditability, the trust wedge).
+
+    Deliverables:
+      1. known_from / known_until on Entity AND Relation (transaction-time axis),
+         default None, round-tripping in JSON.
+      2. as_at(...) — a pure point-in-time filter over the four columns.
+      3. supersede(...) — record a new version of a fact without deleting the
+         old one (append-only): the old version's known_until is closed, the new
+         version's known_from opens; the old record itself is never mutated.
+      4. traverse(...) gains an optional known_as_of so edges can be filtered on
+         BOTH axes (valid AND transaction), not just valid-time.
+
+    The CORE owns these pure functions; they operate OVER value records (TH-5),
+    never as methods on them. Transaction-time is a caller-supplied EXPLICIT
+    input — cairn never stamps now() (that would break byte-stability and the
+    determinism invariant; see C-BITEMP-5).
+  success_metric: "All constraint tests pass under the project venv (python 3.11), stdlib-only, byte-stable across runs; joint_satisfaction_test green."
+  stakeholders:
+    - "cairn users (agents that must answer 'what did I know at T' and correct facts without losing history)"
+    - "traverse() (bitemporal edge filter, both axes)"
+    - "cairn-retrieval (point-in-time context assembly)"
+
+# ------------------------------------------------------------------------------
+# Design decisions pinned by this intent (OQ-4 + naming + wall-clock)
+# ------------------------------------------------------------------------------
+design_decisions:
+  open_end_sentinel:   # resolves OQ-4
+    decision: "None is the open end (== +infinity). Intervals are half-open [start, end)."
+    predicate: "in-interval(T) := (start is None or start <= T) and (end is None or T < end)"
+    rationale: >
+      Pins the ambiguous 'T < end' comparison from TH-3's design_consequence.
+      None already means 'open' in the existing _edge_valid; making it the ONE
+      sentinel across both axes keeps a single comparison rule. A sentinel
+      string (+infinity) would sort lexicographically against real ISO dates and
+      is a foot-gun; None is unambiguous and type-clean.
+  axis_naming:
+    decision: "Transaction-time fields are known_from / known_until (symmetric with the existing valid_from / valid_until valid-time pair)."
+    maps_to: "Snodgrass/SQL:2011 transaction-time [created_at, expired_at]; Graphiti t_created/t_expired. known_* is the plain-English form of the audit question 'what did the agent KNOW at T'."
+  transaction_time_is_explicit:
+    decision: "known_from / known_until are caller-supplied. Cairn NEVER derives them from the wall clock."
+    rationale: "The whole thesis is a deterministic, byte-stable world model. now() at ingestion would make two builds of the same corpus differ. The caller passes its ingestion instant (batch timestamp / monotonic version), exactly as `as_of` is explicit in traverse."
+
+interface:
+  type: "library"
+  tools:
+    - name: "as_at"
+      description: "as_at(facts, *, valid_as_of=None, known_as_of=None) -> tuple[...]. Returns the subset of facts (Entities or Relations) whose valid-time interval contains valid_as_of AND whose transaction-time interval contains known_as_of. None on an axis = do not filter that axis. Half-open, None = open end."
+      parameters:
+        - name: "facts"
+          type: "iterable"
+          required: true
+          description: "Entities or Relations (anything carrying the four time columns)"
+        - name: "valid_as_of"
+          type: "string"
+          required: false
+          description: "ISO 8601 instant on the valid-time axis; None = do not filter valid-time"
+        - name: "known_as_of"
+          type: "string"
+          required: false
+          description: "ISO 8601 instant on the transaction-time axis; None = do not filter transaction-time"
+      returns: "tuple of the input facts that pass the four-column predicate, order preserved"
+      test: "packages/cairn-engine/tests/unit/test_bitemporal.py::test_as_at_four_column"
+    - name: "supersede"
+      description: "supersede(history, new_fact, *, at) -> tuple[...]. Append-only correction: closes the known_until of the currently-known matching fact(s) at `at`, sets new_fact.known_from = at, and returns the FULL history (old versions retained + new version appended). Never mutates or drops a record."
+      parameters:
+        - name: "history"
+          type: "iterable"
+          required: true
+          description: "The existing versions (Entities or Relations sharing identity)"
+        - name: "new_fact"
+          type: "object"
+          required: true
+          description: "The new version to record"
+        - name: "at"
+          type: "string"
+          required: true
+          description: "ISO 8601 transaction-time instant of the correction (explicit — never now())"
+      returns: "tuple: prior versions (with known_until closed on the superseded one) + the new version"
+      test: "packages/cairn-engine/tests/unit/test_bitemporal.py::test_supersede_append_only"
+
+# ------------------------------------------------------------------------------
+# Constraints — critical LAST (position bias; UltraBench 2025).
+# Each maps 1:1 to a named test. 5 constraints -> joint_satisfaction required.
+# ------------------------------------------------------------------------------
+constraints:
+  - id: "C-BITEMP-1"
+    statement: "Entity and Relation each carry transaction-time columns known_from / known_until (default None), independent of the existing valid_from / valid_until valid-time columns. Both axes round-trip byte-identically through dump_entities/load_entities."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-engine/tests/unit/test_bitemporal.py::test_four_columns_roundtrip"
+    test_provenance: "human_authored"
+
+  - id: "C-BITEMP-2"
+    statement: "as_at filters on BOTH axes with the four-column half-open predicate. 'What was TRUE at T': valid_from <= T < valid_until. 'What was KNOWN at T': known_from <= T < known_until. A None argument on an axis disables filtering on that axis only."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-engine/tests/unit/test_bitemporal.py::test_as_at_four_column"
+    test_provenance: "human_authored"
+    execution_oracle:
+      type: "golden_fixture"
+      note: "Hand-computed: a fact valid last Tuesday but known only from today is excluded by known_as_of=Tuesday, included by known_as_of=today; valid_as_of=Tuesday includes it on the valid axis. All four boundary cases asserted."
+
+  - id: "C-BITEMP-3"
+    statement: "The open-end sentinel is None == +infinity (OQ-4). At the boundary, an interval [start, None) contains every T >= start; [start, end) EXCLUDES T == end (half-open). Applied identically to valid-time and transaction-time."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-engine/tests/unit/test_bitemporal.py::test_open_end_sentinel_boundary"
+    test_provenance: "human_authored"
+
+  - id: "C-BITEMP-4"
+    statement: "Supersession is append-only and immutable: after supersede(history, new, at), the prior record objects are NOT mutated (frozen), NO record is dropped, the superseded version's known_until == at, and the new version's known_from == at. The full audit chain (what was known, when) is reconstructable via as_at over the returned history."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-engine/tests/unit/test_bitemporal.py::test_supersede_append_only"
+    test_provenance: "human_authored"
+
+  # CRITICAL, LAST — contradicts the domain prior (every bitemporal DB stamps
+  # transaction-time with now() automatically). conflict_prone.
+  - id: "C-BITEMP-5"
+    statement: "NO WALL CLOCK. Neither as_at, supersede, nor the model reads the system clock (no datetime.now / time.time / date.today). Transaction-time is always a caller-supplied explicit instant. Two runs over the same inputs produce byte-identical output."
+    assumption_status: "KNOWN"
+    conflict_prone: true
+    anti_pattern: "Auto-stamping known_from = datetime.now(timezone.utc) at ingestion 'like a real temporal DB'. This is the trained-in default and it silently breaks byte-stability + determinism (cairn_system_intent invariant deterministic_resolution_no_llm)."
+    test: "packages/cairn-engine/tests/unit/test_bitemporal.py::test_no_wall_clock_byte_stable"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      type: "differential_test"
+      note: "Build + as_at + supersede twice in one process and assert byte-identical repr/JSON; grep the module source for now()/today()/time( as a static guard."
+
+constraint_satisfiability:
+  count: 5
+  joint_satisfaction_test: "packages/cairn-engine/tests/unit/test_bitemporal.py::test_joint_bitemporal"
+  joint_note: >
+    One test that: builds a small history with both axes set, runs a correction
+    via supersede (C-4), queries it with as_at at three (valid, known) points
+    (C-2) exercising the None open-end (C-3) on four columns that round-tripped
+    through JSON (C-1), and asserts the whole thing is byte-stable with no clock
+    read (C-5). Individual passes do not imply this joint pass.
+  conflicts_checked: >
+    C-5 (no wall clock) vs C-4 (supersede sets known_until=at): no conflict —
+    `at` is the caller's explicit instant, not now(). C-3 (None open end) vs C-2
+    (half-open predicate): consistent — None short-circuits the comparison. No
+    two constraints require mutating a frozen record (C-4 forbids it).
+
+non_goals:
+  - "Automatic ingestion timestamping (explicit-only; see C-BITEMP-5)."
+  - "Allen's full 13 interval relations as an API — only the point-in-time (as_at) and meets-style supersession are in scope for M2.1; interval-algebra queries are a later opt-in."
+  - "Temporal indexing / range trees — M2.1 is linear-scan pure functions; a temporal index is a backend-adapter concern (storage_agnostic_core)."
+  - "Renaming the existing valid_from/valid_until (no breaking change)."
+
+changelog:
+  - version: "0.1.0"
+    date: "2026-07-12"
+    change: "Initial intent for M2.1 bi-temporal state. Resolves OQ-4 (None = open-end sentinel). Adds transaction-time (known_from/known_until), as_at point-in-time query, append-only supersede, and a both-axes traverse filter. 5 constraints, critical (no-wall-clock, conflict_prone) last; joint_satisfaction_test defined."

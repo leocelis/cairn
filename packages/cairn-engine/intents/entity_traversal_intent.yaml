@@ -1,0 +1,176 @@
+# ==============================================================================
+# Cairn — Module Intent: core/entity traversal (M1.4)
+# ==============================================================================
+# License: MIT · Copyright (c) 2026 Leo Celis · https://ivdframework.dev
+# Parent: ../../../cairn_system_intent.yaml (v0.2.1)
+# Patterns: patterns_entities.yaml — OP-34 (bounded traversal), TH-4 (bounded
+#           transitive closure), TH-3 (bitemporal filter), TH-5 (CWA)
+# ==============================================================================
+
+scope:
+  level: "module"
+  type: "feature"
+  granularity: "fine"
+
+metadata:
+  feature_id: "cairn_entity_traversal"
+  category: "agent_infrastructure"
+  tags: ["graph-traversal", "bounded-closure", "deterministic", "hot-path"]
+  status: "in_progress"
+  introduced_version: "0.1.0"
+
+intent:
+  summary: "Bounded relation closure: from a resolved canonical ID, BFS the entity graph (default depth 2) collecting DocumentRefs with hop-distance-discounted scores — deterministic, storage-agnostic via GraphAdapter, stdlib-only, with a flat depth-0 fallback."
+  goal: |
+    Implement traverse() (M1.4) plus the minimal InMemoryGraph it needs (built
+    from Entity.relations + Entity.refs). The core owns the BFS algorithm; the
+    adapter only serves 1-hop edges and node refs — that split is what keeps
+    the core storage-agnostic (a backend may later execute the same bounded
+    intent in its own query language; the core never changes).
+  success_metric: "All constraint tests pass under the project venv (python 3.11), stdlib-only, byte-stable across runs."
+  stakeholders:
+    - "cairn users (agent developers; the WordPress use case M1.6)"
+    - "cairn-retrieval (future consumer via RRF fusion)"
+
+interface:
+  type: "library"
+  tools:
+    - name: "traverse"
+      description: "traverse(canonical_id, *, graph, depth=2, as_of=None) -> list[TraversalHit]. Hits carry (ref, entity_id, hop, score)."
+      parameters:
+        - name: "canonical_id"
+          type: "string"
+          required: true
+          description: "Seed entity (already resolved)"
+        - name: "graph"
+          type: "object"
+          required: true
+          description: "GraphAdapter (1-hop edges + node refs)"
+        - name: "depth"
+          type: "integer"
+          required: false
+          description: "Hop radius; default 2; values outside 0..3 raise ValueError"
+        - name: "as_of"
+          type: "string"
+          required: false
+          description: "ISO 8601 instant for the bitemporal edge filter; None = no temporal filter (never reads the wall clock)"
+      returns: "list[TraversalHit] ordered by (hop asc, entity_id asc, doc_id asc)"
+      test: "packages/cairn-engine/tests/unit/test_traverse.py"
+
+# Critical constraints LAST (position bias — UltraBench 2025).
+constraints:
+  - name: "hop_distance_discount"
+    requirement: "score(hit at hop h) = 1.0 / (1 + h). Seed refs score 1.0, 1-hop 0.5, 2-hop 1/3. No other scoring inputs (no LLM, no learned weights)."
+    test: "packages/cairn-engine/tests/unit/test_traverse.py::test_hop_distance_discount"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      golden_fixture: "3-node chain a->b->c: scores exactly 1.0 / 0.5 / 0.3333333333333333"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 5
+
+  - name: "bounded_depth_default2_max3"
+    requirement: "BFS is bounded: default depth=2; depth outside 0..3 raises ValueError (full closure degenerates to the connected component — TH-4). Nodes are visited at their SHORTEST hop distance (BFS property)."
+    test: "packages/cairn-engine/tests/unit/test_traverse.py::test_bounded_depth_and_shortest_hop"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      golden_fixture: "diamond graph where a node is reachable at hop 1 and hop 2 -> counted once, at hop 1; depth=4 raises"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 4
+
+  - name: "bitemporal_filter_explicit_asof_only"
+    requirement: "With as_of given, an edge is traversed only if (valid_from is null or valid_from <= as_of) and (valid_until is null or as_of < valid_until) — half-open [from, until), ISO-8601 string comparison. With as_of=None, no temporal filter. The traversal NEVER reads the wall clock (a hidden now() would break byte-stability)."
+    test: "packages/cairn-engine/tests/unit/test_traverse.py::test_bitemporal_edge_filter"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      golden_fixture: "edge valid [2026-01-01, 2026-06-01): as_of 2026-03-01 traverses; 2026-06-01 does not (half-open); None traverses"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 3
+
+  - name: "flat_fallback_depth0"
+    requirement: "A graph source with no edges (or flat mode) still returns the seed's own refs at hop 0 — the inverted-index fallback (OP-34). Result is tagged traversal_mode='flat' when the adapter has no edge capability."
+    test: "packages/cairn-engine/tests/unit/test_traverse.py::test_flat_fallback"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      golden_fixture: "refs-only graph: seed refs returned at score 1.0"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 2
+
+  - name: "closed_world_unknown_seed_empty"
+    requirement: "An unknown seed returns an empty result — never a fabricated node, ref, or error-by-guess (CWA/TH-5). Every entity_id in the output exists in the graph source."
+    test: "packages/cairn-engine/tests/unit/test_traverse.py::test_unknown_seed_empty_never_synthesized"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      property_test: "all returned entity_ids are members of the graph"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 1
+
+  - name: "deterministic_order_stdlib_offline"
+    requirement: "Expansion order is sorted (predicate, target_id); output order is (hop asc, entity_id asc, doc_id asc). Same (seed, graph, depth, as_of) -> byte-identical output across runs and rebuilt graphs. Stdlib only; zero LLM; zero network (works with sockets disabled)."
+    test: "packages/cairn-engine/tests/unit/test_traverse.py::test_deterministic_and_offline"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      property_test: "repeated invocation repr-equality on a rebuilt graph + socket.socket monkeypatched to raise"
+    assumption_status: "KNOWN"
+    entropy: "near-zero"
+    priority: 1
+
+constraint_satisfiability:
+  conflicts_checked: true
+  known_tensions:
+    - between: ["bitemporal_filter_explicit_asof_only", "deterministic_order_stdlib_offline"]
+      resolution: "The filter fires only on an explicit as_of parameter — no wall-clock read exists on the path, so temporal filtering and byte-stability coexist."
+    - between: ["flat_fallback_depth0", "bounded_depth_default2_max3"]
+      resolution: "Flat mode is the degenerate depth-0 case of the same bounded closure — one code path, not two."
+  simultaneous_satisfaction: "All satisfiable: one BFS implementation, sorted expansion, explicit time, closed-world lookups."
+  joint_satisfaction_test: "packages/cairn-engine/tests/unit/test_traverse.py::test_joint_all_constraints_on_one_traverse"
+
+rationale:
+  decision: "Core-owned BFS over a 1-hop GraphAdapter; hop-discount scoring; explicit-as_of bitemporal filter; flat fallback."
+  reasoning: "TH-4: retrieval needs the k-hop ego-network, not full closure. OP-34: depth 2 is the empirical QA peak; 1/(1+hop) is the deterministic surrogate for PPR decay. Core-owned BFS keeps storage-agnosticism: adapters serve edges, never run the algorithm."
+  evidence: "foundations/GRAPH_TRAVERSAL_TRANSITIVE_CLOSURE_RESEARCH_2026.md; context/ENTITY_GRAPH_TRAVERSAL_RESEARCH_2026.md; foundations/BITEMPORAL_DATA_MODEL_RESEARCH_2026.md (half-open intervals)"
+  date: "2026-07-11"
+  stakeholder: "Maintainer"
+
+alternatives:
+  - name: "Adapter-owned traversal (adapter.neighbors(entity_id, depth))"
+    rejected_because: "Pushes the algorithm into every adapter — N implementations to keep deterministic and consistent. Core-owned BFS + 1-hop adapters keeps one algorithm; backend-side execution (compiling the bounded intent to Cypher/Gremlin) remains possible later behind the same core API (OQ-3)."
+    date_tested: "2026-07-11"
+  - name: "Default as_of = now()"
+    rejected_because: "A hidden wall-clock read makes the same call return different results at different times — silently violates byte-stability. Time must be an explicit input."
+    date_tested: "2026-07-11"
+
+risks:
+  - condition: "High-branching graphs make depth-2 BFS expensive in-memory."
+    action: "Acceptable at 0.1 scale (<5k entities). Beam pruning / backend delegation are the documented upgrade ladder (OP-34)."
+    monitor: "Phase 4 benchmark"
+    severity: "low"
+  - condition: "ISO-string comparison silently accepts malformed timestamps."
+    action: "0.1 documents ISO 8601 as a caller contract; schema validation lands with M2.1 bitemporal work (OQ-4)."
+    monitor: "M2.1"
+    severity: "low"
+
+implementation:
+  current: "authored alongside this intent (segmented per IVD Rule 1)"
+  version: 1
+  tests: "packages/cairn-engine/tests/unit/test_traverse.py"
+  documentation: "module docstrings; ROADMAP M1.4"
+
+verification:
+  status: "tests authored with implementation; run in the project venv"
+  test_cases:
+    - name: "joint"
+      description: "One traverse() call satisfying all six constraints simultaneously"
+      input: {seed: "post::a", depth: 2, as_of: "2026-03-01"}
+      expected_output: {bounded: true, discounted: true, deterministic: true, offline: true}
+      validates_constraint: "ALL (joint)"
+
+changelog:
+  - version: "0.1.0"
+    date: "2026-07-11"
+    change: "Initial module intent for bounded traversal (M1.4): 6 constraints, critical-last; core-owned BFS decision recorded; explicit-as_of determinism decision recorded."
+    reason: "IVD Rule 1 — intent before implementation."

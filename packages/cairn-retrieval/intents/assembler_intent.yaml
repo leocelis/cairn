@@ -1,0 +1,135 @@
+# ==============================================================================
+# cairn-retrieval — Module Intent: context assembler (M3.5)
+# ==============================================================================
+# License: MIT · Copyright (c) 2026 Leo Celis · https://ivdframework.dev
+# Parent: ../../../cairn_system_intent.yaml (v0.2.1)
+# Patterns: patterns_retrieval_knowledge.yaml — OP-29 (context assembler, PRIMARY),
+#           OP-15 (token budget), FF-11 (length alone degrades — fewest chunks wins)
+# Reuses: cairn.cosine (diversity + dedup on PRECOMPUTED embeddings)
+# ==============================================================================
+
+scope:
+  level: "module"
+  type: "feature"
+  granularity: "fine"
+
+metadata:
+  feature_id: "cairn_retrieval_assembler"
+  category: "agent_infrastructure"
+  tags: ["assembler", "mmr", "budget", "lost-in-the-middle", "trace", "deterministic"]
+  status: "in_progress"
+  introduced_version: "0.0.1"
+
+intent:
+  summary: >
+    A pure-function pipeline that turns fused candidates into the smallest
+    sufficient context package: budget -> MMR-select -> cosine-dedup -> fold-order
+    -> emit + trace manifest (OP-29). Zero generative-LLM calls, no re-embedding
+    on the hot path (uses precomputed vectors), byte-stable.
+  goal: |
+    FF-11 (Du 2025): context LENGTH alone degrades accuracy 13.9-85% even with
+    perfect retrieval — fewest chunks wins. So after fusion the assembler builds
+    the MINIMAL package: relevant AND diverse (MMR), de-duplicated, and ordered so
+    the strongest evidence is at the edges (lost-in-the-middle, Liu 2023), with a
+    trace manifest for auditability.
+
+    Deliverables:
+      1. assemble(candidates, *, budget, lam=0.5, dedup_threshold=0.95)
+         -> AssembledContext(chunks, text, manifest, total_tokens).
+      Candidate = (doc_id, content, tokens, rel, embedding). Pipeline:
+        A budget       — greedy pack within `budget` tokens (no knapsack).
+        B MMR-select   — argmax λ·rel − (1−λ)·max cos(e_i, e_j∈S); tie rel desc,
+                          then doc_id; pick highest-MMR that fits remaining budget.
+        C dedup        — hard gate: skip if cos(e_i, any selected) ≥ dedup_threshold.
+        D fold-order   — rel rank-1 -> FIRST, rank-2 -> LAST, rank-3 -> second, …
+                          (weakest in the middle).
+        E emit         — concatenated content with per-chunk provenance tags +
+                          ManifestEntry(doc_id, tokens, rel, mmr_score, position).
+  success_metric: "All constraint tests pass under the project venv (python 3.11); same (candidates, budget, lam) -> byte-identical package; zero LLM, no re-embed (no embedder param)."
+  stakeholders:
+    - "M3.6 retrieve() (assembler is the final stage before the model sees context)"
+    - "agents that must stay under a token budget without losing the key evidence"
+
+design_decisions:
+  precomputed_embeddings_only:
+    decision: "Candidates carry their embedding vector; the assembler NEVER embeds. It has no embedder parameter."
+    rationale: "OP-29: 'NEVER re-embed on hot path'. Embeddings were computed by the semantic signal at build; the assembler only reads them (cairn.cosine) for MMR diversity + dedup. Keeps the hot path pure + deterministic."
+  greedy_not_knapsack:
+    decision: "Greedy packing — iteratively pick the highest-MMR candidate that fits remaining budget. No optimal knapsack."
+    rationale: "OP-29: knapsack is non-deterministic on ties. Greedy + a fixed tie-break (rel desc, doc_id asc) is byte-stable, which the determinism invariant requires over marginal packing efficiency."
+  fold_ordering:
+    decision: "After selection, order by rel with a fold: strongest first, second-strongest last, alternating inward — weakest in the middle."
+    rationale: "Lost-in-the-middle (Liu 2023): a relevant doc in the middle drops accuracy 20-30pt. Edges are the high-attention positions."
+
+interface:
+  type: "library"
+  tools:
+    - name: "assemble"
+      description: "assemble(candidates, *, budget, lam=0.5, dedup_threshold=0.95) -> AssembledContext."
+      returns: "AssembledContext(chunks, text, manifest, total_tokens)"
+      test: "packages/cairn-retrieval/tests/unit/test_assembler.py"
+
+constraints:
+  - id: "C-ASM-1"
+    statement: "MMR + greedy budget: selection maximizes λ·rel − (1−λ)·max cos-to-selected; the total tokens of selected chunks never exceeds `budget`; a candidate that does not fit the remaining budget is skipped. With diversity weight, a lower-rel but DIVERSE candidate can be chosen over a higher-rel near-duplicate."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_assembler.py::test_mmr_budget"
+    test_provenance: "human_authored"
+    execution_oracle:
+      type: "golden_fixture"
+      note: "3 candidates, a≈b (same vector), c orthogonal; budget fits 2; MMR picks a then c (diverse) over b (near-dup). Hand-computed MMR values."
+
+  - id: "C-ASM-2"
+    statement: "Dedup hard gate: a candidate whose cosine to ANY already-selected chunk is >= dedup_threshold is dropped (the higher-rel one is kept), even if it fits the budget."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_assembler.py::test_dedup_hard_gate"
+    test_provenance: "human_authored"
+
+  - id: "C-ASM-3"
+    statement: "Fold ordering: selected chunks are ordered rel rank-1 -> position 0 (first), rank-2 -> last, rank-3 -> second, rank-4 -> second-to-last, … so the weakest evidence sits in the middle. Deterministic."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_assembler.py::test_fold_ordering"
+    test_provenance: "human_authored"
+
+  - id: "C-ASM-4"
+    statement: "Trace manifest + provenance: every selected chunk has a ManifestEntry(doc_id, tokens, rel, mmr_score, position) with position matching its place in the emitted order; the emitted text carries a per-chunk provenance tag naming the doc_id. total_tokens equals the sum of selected chunk tokens."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-retrieval/tests/unit/test_assembler.py::test_manifest_and_provenance"
+    test_provenance: "human_authored"
+
+  # CRITICAL, LAST — zero-LLM, no re-embed, deterministic (OP-29 keystone).
+  - id: "C-ASM-5"
+    statement: "The assembler makes ZERO generative-LLM calls and NEVER embeds (no embedder parameter; it only reads precomputed candidate embeddings via cairn.cosine). It imports only stdlib + cairn, reads no wall clock, and is byte-stable: same (candidates, budget, lam, dedup_threshold) -> identical AssembledContext."
+    assumption_status: "KNOWN"
+    conflict_prone: true
+    anti_pattern: "Calling an LLM to 'summarize/compress' the selected chunks, or re-embedding candidates inside assemble 'to be safe'. Both break the pure-function + zero-hot-path-cost contract. The assembler only selects, orders, and emits from precomputed inputs."
+    test: "packages/cairn-retrieval/tests/unit/test_assembler.py::test_no_llm_no_reembed_byte_stable"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      type: "differential_test"
+      note: "Static-scan for LLM/network/embedding/clock imports (assert none) + confirm assemble has no embedder param; assemble twice and assert identical package."
+
+constraint_satisfiability:
+  count: 5
+  joint_satisfaction_test: "packages/cairn-retrieval/tests/unit/test_assembler.py::test_joint_assembler"
+  joint_note: >
+    One test assembles a candidate set that exercises budget capping + MMR
+    diversity (C-1), a dedup drop (C-2), fold ordering (C-3), a full manifest with
+    provenance (C-4), all zero-LLM + no re-embed + byte-stable (C-5).
+  conflicts_checked: >
+    C-1 (MMR diversity) vs C-2 (dedup): complementary — MMR softly demotes similar
+    docs, the dedup gate hard-drops near-identical ones. C-3 (fold by rel) vs C-1
+    (select by MMR): no conflict — selection is by MMR, final ORDER is by rel; two
+    separate stages. C-5 (no re-embed) vs C-1/C-2 (need cosine): consistent —
+    cosine runs on PRECOMPUTED candidate embeddings, no embedding is computed.
+
+non_goals:
+  - "LLM summarization / compression of chunks (see C-ASM-5 — pure selection only)."
+  - "Re-embedding or embedding candidates (embeddings are precomputed inputs)."
+  - "Tokenization / token counting (the caller supplies each candidate's token count)."
+  - "Knapsack-optimal packing (greedy + fixed tie-break for determinism)."
+
+changelog:
+  - version: "0.1.0"
+    date: "2026-07-12"
+    change: "Initial intent for M3.5 context assembler. Pure pipeline budget->MMR->dedup->fold-order->emit+trace over precomputed embeddings; zero-LLM, no re-embed. 5 constraints, zero-LLM/no-re-embed keystone (conflict_prone) last; joint test defined."

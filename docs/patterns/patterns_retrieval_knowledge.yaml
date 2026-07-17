@@ -1,0 +1,2011 @@
+# patterns_retrieval_knowledge.yaml
+# ============================================================
+# Question: When does the agent retrieve vs. rely on its own
+# knowledge? How does it store, retrieve, and compound
+# knowledge over time?
+# ============================================================
+# Version: 1.8 (Entity subsystem extracted → patterns_entities.yaml: OP-28, OP-34, OP-35 moved out)
+# Date: 2026-06-27
+# NOTE: This file is the GENERAL retrieval-knowledge corpus. The ENTITY subsystem
+# (OP-28 resolution, OP-34 traversal, OP-35 ontology + theory TH-1..TH-5) now lives
+# in patterns_entities.yaml. First step of a per-subsystem decomposition
+# (gate / entities / orchestration / assembler / eval).
+# Sources (19 research docs under docs/research/):
+#   context/WHEN_TO_RELY_ON_LLM_ALONE.md
+#   context/CONTEXT_BEATS_MODEL_SEMANTIC_VS_GREP.md
+#   context/EMBEDDING_SIMILARITY_THRESHOLDS_RESEARCH_2026.md
+#   context/CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026.md
+#   context/OPENAI_EMBEDDINGS_COMPREHENSIVE_RESEARCH_2026.md
+#   context/RAG_SEMANTIC_INDEXING_OUTPUT_QUALITY_RESEARCH_2025_2026.md
+#   context/RAG_ROUTING_AND_PARADIGM_SELECTION_2026.md
+#   context/SEMANTIC_INDEXING_CURSOR_VS_COPILOT_DEEP_DIVE_2026.md
+#   context/CONTEXT_ASSEMBLY_AND_PACKING_RESEARCH_2026.md
+#   context/LEXICAL_RETRIEVAL_SIGNAL_RESEARCH_2026.md
+#   context/AGENT_RETRIEVAL_EVALUATION_RESEARCH_2026.md
+#   context/RETRIEVAL_GATE_COST_MODEL_RESEARCH_2026.md
+#   context/ENTITY_GRAPH_TRAVERSAL_RESEARCH_2026.md
+#   context/ONTOLOGY_AUTHORING_RESEARCH_2026.md
+#   tools/WORLD_MODEL_TOOL_ROUTING_RESEARCH_2026.md
+#   tools/ENTITY_RELATIONSHIP_RESOLUTION_RESEARCH_2026.md
+#   databases/FALKORDB_GRAPHITI_DEEP_RESEARCH_2026.md
+#   databases/GRAPH_DATABASES_AND_ENTITY_LIBRARIES_2026.md
+
+
+# ============================================================
+# SECTION 1 — FOUNDATIONAL FINDINGS
+# (empirical results that constrain every downstream pattern)
+# ============================================================
+
+foundational_findings:
+
+  - id: FF-1
+    claim: "Context quality outweighs model size"
+    evidence:
+      - paper: "RETRO (Borgeaud 2021)"
+        finding: "7.5B-parameter RETRO + 2T-token retrieval corpus = GPT-3 175B on language modeling"
+      - paper: "Atlas (Izacard 2022)"
+        finding: "11B-parameter Atlas + retrieval beats PaLM 540B on knowledge tasks"
+      - paper: "DPR (Karpukhin 2020)"
+        finding: "Dense passage retrieval beats BM25 by 9–19% on open-domain QA"
+    verdict: "✓ locked — investing in context quality delivers more leverage than upgrading model weights"
+    design_rule: "Before paying for a larger model, exhaust the retrieval quality budget first"
+
+  - id: FF-2
+    claim: "Type of retrieved content determines whether retrieval helps or hurts"
+    evidence:
+      - paper: "arXiv:2503.20589 (March 2025)"
+        finding: |
+          In-context code (directly called/used by current task): +20% Pass@1 via AllianceCoder
+          Similar-domain code (not directly needed):             −5% to −15% Pass@1
+      - paper: "SRACG (AAAI 2026)"
+        finding: |
+          Standard RACG (naive always-on retrieval): −2.58 to −3.61pp vs no retrieval
+          SRACG (selective, necessity-aware):         +2.4 to +7.06pp vs no retrieval
+          Full benchmark table (HumanEval+, 7 LLMs):
+            GPT-3.5-Turbo: baseline 59.82 → RACG 56.21 (−3.61) → SRACG 66.88 (+7.06)
+            DeepSeek-V3:   baseline 82.80 → RACG 80.22 (−2.58) → SRACG 85.97 (+3.17)
+    verdict: "✓ locked — retrieval presence is not the variable; retrieval relevance is"
+    design_rule: |
+      The agent must retrieve what the task NEEDS (in-context dependencies, exact API usage,
+      execution context) not what is semantically SIMILAR (same domain, adjacent functionality).
+      Confusing similarity with relevance is the primary retrieval failure mode.
+
+  - id: FF-3
+    claim: "More retrieval is not always better; top-1 often beats top-5"
+    evidence:
+      - paper: "arXiv:2511.05302 (November 2025) — code review generation"
+        finding: |
+          top-1 BLEU-4: 12.32 | top-3: 11.76 | top-5: 10.81
+          Paper states: "A consistent non-monotonic trend appears: top-1 performs best;
+          top-3 and top-5 degrade performance."
+      - paper: "SRACG (AAAI 2026)"
+        finding: "T=1 (single retrieved example) consistently outperforms T=2 to T=5 across models"
+    verdict: "✓ locked"
+    design_rule: "Default to k=1 and justify increasing k. Never batch-retrieve on reflex."
+
+  - id: FF-4
+    claim: "Oracle-SWE contribution ranking: which retrieval signals matter most for coding agents"
+    source: "arXiv:2604.07789 (Microsoft Research + Georgia Tech, April 2026)"
+    individual_signal_ranking:
+      "#1": "Reproduction Test — failing test that reproduces the bug (adds +33–45pp alone)"
+      "#2 (tied)": "Execution Context — error traces, stack traces, runtime behavior"
+      "#2 (tied)": "Edit Location — exact file and line range to modify"
+      "#4": "API Usage — what APIs the fix should use (+2–5pp)"
+      "#5": "Regression Test — tests that should pass before and after (+3–4pp)"
+    cumulative_numbers_gpt4o_swe_bench_verified:
+      base: "23%"
+      plus_reproduction_test: "56% (+33–45pp)"
+      plus_edit_location: "70% (+10–27pp)"
+      plus_execution_context: "92% (+22pp)"
+      plus_api_usage: "97% (+5pp)"
+    design_rule: |
+      Build the execute-repair loop FIRST — it provides signals #1 and #2 (execution context
+      and reproduction tests), which contribute more quality gain than any retrieval improvement.
+      Semantic indexing improves signals #3 and #4 (edit location, API usage) — real value,
+      but second-tier priority.
+    failure_mode_analysis:
+      "#1 failure: incorrect implementation (39.9%)": "model problem — retrieval cannot fix this"
+      "#2 failure: overly specific implementation (23.4%)": "model problem"
+      "#3 failure: failed to find edit location (12.9%)": "retrieval problem — semantic indexing directly helps"
+      "#4 failure: failed to find relevant file (12.1%)": "retrieval problem — semantic indexing helps"
+
+  - id: FF-5
+    claim: "Context accumulation degrades model performance — all models, no exceptions"
+    evidence:
+      - study: "Chroma 2025 — Context Rot (research.trychroma.com/context-rot)"
+        finding: |
+          18 frontier models tested (Claude Sonnet 4, GPT-4.1, Qwen3-32B, Gemini 2.5 Flash, etc.)
+          ALL 18 degrade with increasing input length — no exceptions.
+          Semantic distractors (related context) cause worse degradation than unrelated filler.
+          Non-uniform degradation pattern: acceleration as context grows.
+      - study: "Stanford/Samaya AI TACL 2024 — Lost in the Middle (arXiv:2307.03172, 2000+ citations)"
+        finding: |
+          U-shaped performance curve: relevant info at beginning or end performs well;
+          at the middle, GPT-3.5-Turbo drops BELOW its closed-book baseline (56.1%).
+    practical_claude_code_timeline:
+      "~20% context": "noticeable degradation begins, loses track of earlier decisions"
+      "~40% context": "automatic compression kicks in"
+      "~48% context": "model recommends fresh session"
+    design_rule: |
+      Retrieval that accumulates raw chunks in context is net negative over long sessions.
+      Compress retrieved content to summaries before injecting. Treat context as a finite
+      resource with diminishing marginal returns — not a bucket to fill.
+
+  - id: FF-6
+    claim: "Context failures fall into four structural modes — adding more context is not a universal fix"
+    source: "Drew Breunig Jun 2025 — adopted by LangChain, O'Reilly; HaystackCraft arXiv:2510.07414; CHARM arXiv:2606.04435"
+    four_failure_modes:
+      poisoning: "Error/hallucination enters context and gets re-referenced as ground truth (bad retrieval chunk; wrong tool result accepted as fact)"
+      distraction: "Model over-indexes on long context vs. training prior (>100K tokens → action repetition; Gemini Pokémon agent example)"
+      confusion: "Superfluous context steers response (46 tools vs 19 for same 8B model; early wrong attempts in history)"
+      clash: "Contradictory facts/tools/instructions coexist (stale corpus doc + fresh tool result; overlapping tool descriptions)"
+    agentic_extensions:
+      cascade_corruption: "Derived conclusions become inputs; logical chain is coherent at every step — self-correction confirms rather than catches (CHARM; Tian Pan 2026)"
+      retrieval_thrash: "Oscillating search strategies without convergence"
+      tool_storm: "Redundant calls filling window with noise"
+      self_distraction: "Model's own prior reasoning rounds become distractors (HaystackCraft — 'self-generated distractors')"
+    design_rule: |
+      Classify every production failure into one mode before patching.
+      Adding more context fixes confusion poorly and often worsens clash.
+      Correct mitigation by mode:
+        poisoning → quarantine unverified writes; provenance tags
+        distraction → compaction; offloading; phase boundaries
+        confusion → tool RAG; pruning; remove failed attempts from history
+        clash → conflict resolution hierarchy; dedupe; version pins
+    verdict: "✓ locked — canonical industry failure taxonomy as of 2025"
+
+  - id: FF-7
+    claim: "Cascading corruption is the deepest agent blind spot — LLM self-correction is nearly useless against it"
+    evidence:
+      - paper: "CHARM arXiv:2606.04435"
+        finding: "Cascade detection rate: 89.4% (CHARM framework) vs 12.8% (LLM self-correction); interrupts at ~stage 2.1"
+      - paper: "HaystackCraft arXiv:2510.07414"
+        finding: |
+          Multi-round enforced reasoning amplifies early errors; GPT-5 and Gemini 2.5 Pro not immune.
+          GPT-5 mini matches GPT-5 on single-pass NIAH but collapses under enforced multi-round reasoning —
+          more rounds can hurt more than longer single-pass context. Static NIAH does NOT predict agentic robustness.
+      - practitioner: "Tian Pan Apr 2026 — early-stage errors (steps 1–4) have longest propagation chain"
+    mechanism: |
+      One wrong fact at step 2 shapes tool choice, parameters, and interpretation for 50+ steps.
+      The chain is logically coherent given the wrong premise — confirmation bias makes self-correction fail.
+      Compaction amplifies: summarizing a corrupted chain cements the error into 'trusted' compressed memory.
+    containment_architecture:
+      phase_boundary: "Fresh window with verified-only outputs (structured handoff)"
+      checkpoint_verifier: "Independent verifier with no shared chain — NLI / cross-encoder / rule oracle on stage output"
+      scope_isolation: "Sub-agent explores; parent gets summary + citations only"
+      hard_stop_rules: "Max N retrieval rounds; max M tool calls per sub-task"
+    critical_rule: "Run verification BEFORE compact, not after. Summarizing a corrupted chain cements the error."
+    design_rule: |
+      Never rely on LLM self-correction to catch cascades — structural detection required.
+      Execution-derived tests + CHARM-style stage checkpoints are the mitigation path.
+      Static NIAH tests do NOT predict multi-round agentic robustness (refuted by HaystackCraft).
+    verdict: "✓ locked — structural LLM limitation, not a model quality issue"
+
+  - id: FF-8
+    claim: "Context strategy requires an explicit accuracy/latency/cost tradeoff — full context is the ceiling but not the default"
+    source: "Mem0 LOCOMO benchmark arXiv:2504.19413; effective utilization arXiv:2603.04814"
+    tradeoff_table:
+      full_context:
+        accuracy: "~73% J-score (ceiling)"
+        latency_p95: "~17s"
+        tokens_per_query: "~26,000"
+        when_to_use: "Bounded high-stakes sessions (legal review, incident debug); architectural impossibility for months-long agents"
+      mem0_fact_extract:
+        accuracy: "~67% (−6pp)"
+        latency_p95: "~1.4s (−91%)"
+        tokens_per_query: "~1,764 (−93%)"
+        when_to_use: "Production default; cross-session personalization"
+      vector_plus_metadata:
+        accuracy: "~67%"
+        latency_p95: "<1.5s"
+        tokens_per_query: "low"
+        when_to_use: "Simple preference/history retrieval"
+    key_insight: |
+      Nominal 200K–1M context windows ≠ effective utilization — longer input can impair reasoning
+      even when affordable (arXiv:2603.04814). Full context = accuracy ceiling, but an architectural
+      impossibility for months-long agents.
+    decision_rule: |
+      if stakes == HIGH and horizon == BOUNDED:
+          prefer full context or large raw window
+      elif stakes == HIGH and horizon == UNBOUNDED:
+          external memory + verify-before-answer + tool grounding
+      elif stakes == LOW:
+          external memory + adaptive retrieval gate (7-test)
+    design_rule: "Profile-select memory strategy per intent — not one-size context assembly for all routes."
+    verdict: "✓ locked — Mem0 LOCOMO is the calibration benchmark for this tradeoff"
+
+  - id: FF-9
+    claim: "Commercial assistants and long-context LLMs degrade ~30% accuracy in sustained multi-session interactions"
+    source: "LongMemEval benchmark 2025; LoCoMo dataset 2024; Reflective Memory Management (RMM) ACL 2025; SynapticRAG arXiv 2025; context/CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026.md"
+    evidence:
+      longmemeval:
+        finding: "Commercial assistants and long-context LLMs show 30% accuracy drops on sustained interactions"
+        five_abilities_tested:
+          - "Information extraction"
+          - "Multi-session reasoning"
+          - "Temporal reasoning"
+          - "Knowledge updates"
+          - "Abstention (knowing when information is unavailable)"
+      locomo_dataset: "Conversations spanning up to 32 sessions, 600 turns, 16K tokens average — models struggle with long-range temporal and causal dynamics"
+      rigid_granularity: "Fixed retrieval mechanisms cannot adapt to the diverse contexts that emerge across sessions"
+    sota_approaches:
+      rmm:
+        method: "Reflective Memory Management — forward-looking prospective + backward-looking retrospective reflection with RL-based refinement"
+        result: "+10% accuracy improvement on LongMemEval"
+      synapticrag:
+        method: "Biologically-inspired temporal association triggers + dynamic leaky integrate-and-fire mechanism"
+        result: "Up to +14.66% improvement across English, Chinese, Japanese datasets"
+    design_rule: |
+      Long-session memory is an unsolved problem for all commercial systems at 30+ turns.
+      Do not assume context window alone solves it — the degradation happens even with full context available.
+      Mitigation requires: multi-granularity storage, dynamic retrieval (not just semantic similarity),
+      and explicit memory updating/reconsolidation on recall.
+    verdict: "✓ locked — measured on production commercial systems, not research prototypes"
+
+  - id: FF-10
+    claim: "Parametric knowledge has three hard structural failure modes — 'it's in the weights' does not mean 'you can get it out reliably'"
+    source: "Allen-Zhu & Li 3.1 arXiv:2309.14316 ICML 2024; Berglund et al. 2023 arXiv:2309.12288 ICLR 2024; Allen-Zhu & Li 3.3 arXiv:2404.05405 ICLR 2025; Xu et al. 2024 arXiv:2401.11817; WHEN_TO_RELY_ON_LLM_ALONE.md + CONTEXT_BEATS_MODEL_SEMANTIC_VS_GREP.md"
+    three_failure_modes:
+      extraction_failure:
+        paper: "Allen-Zhu & Li — Physics of Language Models 3.1 (ICML 2024)"
+        finding: "Whether a model can *extract* a memorized fact depends on training-data diversity and augmentation. Without sufficient augmentation → knowledge is memorized but ~0% QA accuracy. Instruction fine-tuning cannot fix it."
+        implication: "Presence in training data does not imply queryable access — the knowledge is locked."
+      direction_failure:
+        paper: "Berglund et al. — The Reversal Curse (ICLR 2024)"
+        finding: "A model trained on 'A is B' often cannot answer 'B is ?' — parametric recall is asymmetric and order-bound. Not a clean knowledge store."
+        implication: "Relational facts stored parametrically may be retrieval-direction-dependent; context retrieval sidesteps this entirely."
+      capacity_ceiling:
+        paper: "Allen-Zhu & Li — Physics of Language Models 3.3 (ICLR 2025)"
+        finding: "Models store ~2 bits of knowledge per parameter (even at int8). A 7B model ≈ 14B bits — a hard ceiling on what weights can hold."
+        implication: "Finite and bounded. Every fact squeezed into weights displaces others; external retrieval has no such ceiling."
+    hallucination_bound:
+      paper: "Xu, Jain, Kankanhalli (2024) — Hallucination is Inevitable (arXiv:2401.11817)"
+      finding: "Theoretical impossibility proof: no computable LLM can learn all computable functions → hallucination is structurally inevitable as a general problem-solver."
+      framing_shift: "Objective is not elimination but robust reduction and management. External context is the primary management lever — not prompt engineering or model size."
+    design_rule: |
+      Never assume that because a fact *should* be in training data, the model can produce it accurately.
+      The three failure modes mean: if correctness matters on specific/current/long-tail knowledge,
+      supply it in context. The hallucination bound means: treat all parametric outputs as
+      drafts requiring grounding, not assertions requiring verification only when "suspicious."
+    verdict: "✓ locked — theoretical proofs + empirical demonstrations across multiple independent papers"
+
+  - id: FF-11
+    claim: "Context length alone degrades LLM performance 13.9–85%, even with perfect retrieval and irrelevant tokens masked"
+    source: "Du et al. 2025 (EMNLP Findings) arXiv:2510.05381; context/CONTEXT_ASSEMBLY_AND_PACKING_RESEARCH_2026.md"
+    finding: >
+      Du et al. 2025: with 100% perfect retrieval and all irrelevant tokens masked, accuracy still
+      degrades 13.9%–85% as input length grows — from LENGTH ALONE, not noise. The performance
+      degradation is a structural LLM property, independent of retrieval quality.
+    implication: "Fewer chunks wins. k=1–3 is not a cost-cutting shortcut — it is the quality-maximizing choice even when more docs are available."
+    design_rule: |
+      After retrieval, select the MINIMUM sufficient set. More context is not better — it is a tax.
+      The assembler's primary objective is not coverage maximization but minimal-sufficient-package construction.
+      Lead with FF-11 in any argument for aggressive context pruning; this is the strongest published basis.
+    ties_to: "OP-29 (assembler uses FF-11 as its foundational basis); FF-3 (top-1 often beats top-5 — consistent with length penalty)"
+    verdict: "✓ locked — EMNLP Findings 2025, controlled experiment"
+
+# ============================================================
+# SECTION 2 — OPERATIONAL PATTERNS
+# (concrete implementation decisions for the super agent)
+# ============================================================
+
+operational_patterns:
+
+  - id: OP-1
+    name: "When-to-Retrieve Gate (7-test decision)"
+    question: "Should the agent retrieve before answering this query?"
+    source: "WHEN_TO_RELY_ON_LLM_ALONE.md + SRACG AAAI 2026 (necessity-aware selection)"
+    gate_tests:
+      T1_popularity:
+        check: "Is this topic well-represented in training data (> ~2022 cutoff, widely documented)?"
+        retrieve_if: "No — the model's parametric knowledge is thin or stale"
+      T2_recency:
+        check: "Does the answer change based on data after training cutoff?"
+        retrieve_if: "Yes — model is likely to hallucinate recent changes"
+      T3_task_type:
+        check: "Is this a classification/reasoning task (retrieve helps) or pure generation (retrieve neutral)?"
+        retrieve_if: "Classification or QA over documents"
+      T4_stakes:
+        check: "Would a wrong answer cause material harm (financial, clinical, legal)?"
+        retrieve_if: "Yes — errors are costly enough to justify retrieval overhead"
+      T5_private_data:
+        check: "Does answering require knowledge the model could not have been trained on?"
+        retrieve_if: "Yes, always — model has no access to private corpora"
+      T6_model_confidence:
+        check: "Is P(IK) low for this query type? (Kadavath 2022, arXiv:2207.05221)"
+        confidence_gate: |
+          P(IK) = model's probability of knowing the answer
+          P(True) = calibration signal
+          Low P(IK) → uncertain → retrieve
+          High P(IK) on CAT-1/9 irreplaceable decisions → still escalate (confidence ≠ license to decide)
+        retrieve_if: "P(IK) below domain calibration threshold"
+      T7_retrieval_risk:
+        check: "Would retrieval likely return similar-but-wrong context for this query type?"
+        retrieve_if: "No — if retrieval noise risk is high, LLM-alone is safer"
+    adaptive_rag_sota:
+      Self_RAG: "LLM generates retrieval tokens inline; retrieves on demand"
+      Adaptive_RAG: "Classifier routes query to retrieve vs. skip vs. multi-step"
+      FLARE: "Retrieve when LLM confidence drops below threshold during generation"
+    sracg_finding: "Necessity-aware selection (removing T1 proxy = −4.51pp) is the single largest contributor in SRACG ablation"
+
+  - id: OP-2
+    name: "Type-of-Retrieval Classifier"
+    question: "What kind of content should be retrieved for this task?"
+    source: "arXiv:2503.20589 + RAG_SEMANTIC_INDEXING_OUTPUT_QUALITY_RESEARCH_2025_2026.md (section 8)"
+    retrieval_taxonomy:
+      tier_A_always_helpful:
+        types:
+          - "In-context code: the functions/APIs/modules the current task directly calls"
+          - "Execution context: error traces, failing tests, runtime behavior"
+          - "Edit location: exact file and line range the task touches"
+          - "API signatures: precise interface definitions for what the code invokes"
+        gain: "+6% to +27% Pass@1 (CodeRAG-Bench NAACL 2025; arXiv:2503.20589)"
+      tier_B_sometimes_helpful:
+        types:
+          - "Documentation for well-understood APIs (only when incomplete knowledge is suspected)"
+          - "Similar solved tasks from the outcome-labeled feedback corpus"
+        gain: "+2% to +10% depending on corpus quality"
+      tier_C_avoid:
+        types:
+          - "Similar-domain code (same domain, not directly called by the task)"
+          - "Top-k results beyond top-1 when tasks are narrow (code review, single-function tasks)"
+          - "Outdated/stale context (old API versions, deprecated patterns)"
+        harm: "−5% to −15% Pass@1 (arXiv:2503.20589); −2.6% to −3.6% for always-on naive RAG (SRACG)"
+    design_rule: |
+      Before retrieval: classify WHAT to retrieve, not just WHETHER to retrieve.
+      The agent needs a query decomposition step that extracts:
+        (a) what APIs/modules the task directly interacts with,
+        (b) what execution signals exist (test failures, error traces),
+        (c) what file locations are implicated.
+      Retrieve Tier A first. Add Tier B only if Tier A is insufficient.
+      Never retrieve Tier C.
+
+  - id: OP-3
+    name: "Hybrid Retrieval Architecture"
+    question: "What index types should power retrieval?"
+    source: "CONTEXT_BEATS_MODEL_SEMANTIC_VS_GREP.md + RAG_SEMANTIC_INDEXING_OUTPUT_QUALITY_RESEARCH_2025_2026.md + OPENAI_EMBEDDINGS_COMPREHENSIVE_RESEARCH_2026.md"
+    finding: "No single retrieval method is consistently best; hybrid always outperforms single-method"
+    layers:
+      layer_1_structural:
+        method: "Symbol graph / LSP (Go to Definition, Find All References, call graph)"
+        best_for: "Dependency lookup, file relations, exact symbol location"
+        evidence: "RepoScope (arXiv:2507.14791): +36.35% relative pass@1 over semantic-only by adding structural context; Sverklo benchmark: F1=0.86 on file dependency tasks (structural wins)"
+        failure_mode: "Dynamic invocations, ORM proxy patterns, deserialization-driven calls (not in static graph)"
+      layer_2_keyword:
+        method: "BM25 / full-text search (FTS) / ripgrep"
+        best_for: "Exact string match, uncommon identifiers, grep-amenable patterns"
+        evidence: "BEIR benchmark: BM25 competitive or better out-of-domain vs. dense retrieval; Claude Code removed vector index — 'agentic grep won by a lot'"
+        caveat: "14× lower precision vs. code-specific dense retrieval on code search tasks (CodeRankEmbed P@5 = 91.60% vs BM25 6.57%)"
+      layer_3_semantic:
+        method: "Dense vector embeddings (domain-specific > generic text embeddings)"
+        best_for: "Cross-file semantic relationships, finding what-is-related-to this concept, multi-hop retrieval"
+        evidence: "Cursor semsearch: +12.5% avg accuracy vs. grep-only on Cursor Context Bench; CodeRankEmbed P@5 = 91.60%"
+        caveat: "Generic text embeddings (ada-002) on code ≈ BM25 on code; domain-specific model required for meaningful lift"
+      layer_4_metadata:
+        method: "Structured filter + recency sort applied on top of vector results"
+        best_for: "Narrowing by date, file type, access permissions, codebase scope"
+        performance_note: "Filtered vector search is SLOWER than unfiltered (unlike SQL). Use integrated filtering (Qdrant filterable HNSW) not post-filtering."
+    combination_method: "Reciprocal Rank Fusion (RRF) across layers; channelized RRF (per-channel weights) outperforms standard RRF (Sverklo benchmark)"
+    completion_vs_agentic_distinction:
+      source: "RAG_SEMANTIC_INDEXING_OUTPUT_QUALITY_RESEARCH_2025_2026.md §7.2; Augment CCEval 2025"
+      completion_retrieval:
+        latency_budget: "100–200ms (real-time inline suggestion)"
+        context_source: "Current file + recent edits + open tabs (local sliding window)"
+        retrieval_method: "Jaccard similarity on 60-line windows; fast, no pre-built semantic index needed"
+        quality_driver: "Local context dominates — the next tokens are almost always locally determined"
+        long_range_semantic_value: "Minimal — retrieval adds latency without proportional quality gain for next-token prediction"
+      agentic_retrieval:
+        latency_budget: "Seconds to minutes (async, multi-step)"
+        context_source: "Full repository index + terminal output + test results + external docs"
+        retrieval_method: "Semantic index + structural graph + grep; pre-built index essential"
+        quality_driver: "Cross-file semantic relationships dominate — tasks span files and modules"
+        long_range_semantic_value: "Essential — impossible to complete multi-file tasks without cross-file retrieval"
+    design_rule: |
+      Default retrieval stack (in order of query routing):
+        1. Structural (symbol graph / LSP) for dependency-type queries
+        2. Keyword (BM25/grep) for exact-identifier queries
+        3. Semantic for conceptual/cross-file queries
+        4. Metadata filter applied on top of any of the above
+      Merge with RRF. Never deploy a single-layer index to production.
+      For completion tasks (real-time, <200ms): local sliding window context is sufficient;
+      semantic index adds cost without proportional gain.
+      For agentic tasks (async, multi-file): full hybrid stack is required — local context alone fails.
+
+  - id: OP-4
+    name: "Two-Stage Retrieval Pipeline (Retrieve → Rerank)"
+    question: "How to get precise results at scale?"
+    source: "OPENAI_EMBEDDINGS_COMPREHENSIVE_RESEARCH_2026.md (reranking section)"
+    why: |
+      Bi-encoder embeddings compress all document information into fixed-size vectors,
+      causing information loss for nuanced queries. Cross-encoders process query+document
+      jointly for much higher accuracy — but are too slow to run on the full corpus.
+    stage_1_fast_retrieval:
+      method: "Bi-encoder (dense embeddings) against vector index"
+      output: "Top 50–100 candidates"
+      cost: "D + Q operations (scalable to billions of documents)"
+    stage_2_precise_reranking:
+      method: "Cross-encoder scores query + document jointly"
+      output: "Top 3–10 results passed to LLM"
+      cost: "N × Q operations — only viable on small candidate set"
+      accuracy_gain: "+10–30% relevance vs. bi-encoder only"
+      advanced_option: "CROSS-JEM (arXiv:2409.09795): 4× lower latency by scoring multiple items jointly"
+    full_pipeline: |
+      Query → Hybrid retrieval (OP-3) → Top 100 → Cross-encoder rerank → Top 3–10 → Context compression → LLM
+    design_rule: "Use bi-encoders for scale, cross-encoders for precision. Always rerank before injecting into context."
+
+  - id: OP-5
+    name: "Chunking Strategy by Domain"
+    question: "How should documents be split before embedding?"
+    source: "OPENAI_EMBEDDINGS_COMPREHENSIVE_RESEARCH_2026.md (chunking section)"
+    critical_finding: "Poor chunking can reduce RAG accuracy by 40–60%"
+    strategy_hierarchy:
+      - method: "Truncation"
+        when: "Only the beginning of docs is relevant. Otherwise avoid."
+        quality: "Loses content — do not use as default"
+      - method: "Fixed-size chunking (500–1000 tokens, 10–20% overlap)"
+        when: "Speed is critical, domain is uniform"
+        quality: "10–20% lower accuracy than semantic methods"
+      - method: "Recursive character splitting (paragraph → sentence → word)"
+        when: "Default for most production use cases"
+        quality: "Balances quality and performance; 15–30% better recall from overlap vs. no overlap"
+      - method: "Semantic chunking (embed potential split points, split at semantic boundaries)"
+        when: "Accuracy is paramount, latency is acceptable"
+        quality: "15–25% better than fixed-size; 3–5× more compute"
+      - method: "Document-aware / AST-based chunking (tables, code blocks, headers as boundaries)"
+        when: "Technical docs, code repositories, structured content"
+        quality: "+40% domain-specific accuracy vs. fixed-size; code structure dominates over NL descriptions (cross-lingual RACG: removing comments costs only −2.37%)"
+    parent_child_pattern:
+      what: "Embed small child chunks (400 chars / ~100–300 tokens); retrieve corresponding large parent chunks (2000 chars / ~1000–2000 tokens)"
+      why: "Small chunks → better semantic precision. Large parents → contextual richness for LLM. Child hits precise span; parent gives surrounding context — fixes chunk-boundary hallucination."
+      implementation: "Store parent docs in key-value store; embed children in vector DB; retrieval returns parent"
+      evidence: "Production RAG literature 2025: +15–30% on context-dependent QA vs flat chunking (Timeless 2025 survey)"
+      dedupe_rule: "When multiple children share the same parent, return the parent only once"
+    chunk_size_by_domain:
+      FAQs: "200–400 tokens (self-contained questions)"
+      technical_docs: "600–1200 tokens (complex concepts)"
+      legal_documents: "800–1500 tokens (dense, context-heavy)"
+      news_articles: "400–800 tokens"
+      code: "500–1000 tokens (function/class level)"
+      chat_conversational: "200–300 tokens"
+    overlap_recommendation: "10–20% overlap. 15–30% better recall. More than 20% → redundant storage."
+    design_rule: |
+      For code: use AST/document-aware chunking (function/class boundaries).
+      For text: use recursive character splitting as default.
+      Always apply parent-child pattern for domain where retrieved chunk alone lacks context.
+
+  - id: OP-6
+    name: "Similarity Score Thresholds"
+    question: "How do I interpret cosine similarity scores and set production thresholds?"
+    source: "EMBEDDING_SIMILARITY_THRESHOLDS_RESEARCH_2026.md"
+    score_interpretation_table:
+      "0.90–1.00": "Near-identical or duplicate — exact match zone"
+      "0.70–0.90": "Same topic, different expression — strong match"
+      "0.50–0.70": "Related concepts — moderate relevance"
+      "0.40–0.50": "Tangentially related — weak signal"
+      "<0.40": "Noise — discard"
+    threshold_by_use_case:
+      high_precision:
+        range: "0.75–0.95"
+        use_cases: "Duplicate detection, exact concept matching, legal/compliance retrieval"
+        tradeoff: "High precision, lower recall — misses paraphrases"
+      balanced:
+        range: "0.55–0.75"
+        use_cases: "Production RAG, semantic search, knowledge base Q&A"
+        tradeoff: "Good balance; most common production setting"
+      high_recall:
+        range: "0.40–0.55"
+        use_cases: "Broad exploration, discovery, brainstorming, early research"
+        tradeoff: "More noise; requires downstream filtering"
+    top_k_guidelines:
+      typical: "5–10 results (most common in production)"
+      code_review_and_narrow_tasks: "1 result (top-1 outperforms top-5 per arXiv:2511.05302)"
+      combination: "threshold + top-k beats top-k alone (threshold filters noise before k)"
+    adaptive_thresholding:
+      what: "Raise threshold when latency is critical; lower threshold when recall is critical"
+      when_to_override: "Domain-specific training data may shift all scores by ±0.05–0.15; calibrate per corpus before setting thresholds in production"
+    design_rule: |
+      Start at 0.55–0.65 threshold with k=5 for balanced production RAG.
+      Raise to 0.75+ for high-precision use cases (legal, compliance, exact answer).
+      Drop to 0.40–0.50 only for exploration use cases.
+      ALWAYS combine threshold + top-k; never top-k alone.
+      Calibrate per domain — scores are not universal.
+
+  - id: OP-7
+    name: "Embedding Model Selection and Dimension Optimization"
+    question: "Which embedding model and what dimensions?"
+    source: "OPENAI_EMBEDDINGS_COMPREHENSIVE_RESEARCH_2026.md"
+    model_comparison:
+      text_embedding_3_small:
+        dimensions: 1536
+        mteb_score: "62.3%"
+        cost: "$0.00002 / 1K tokens"
+        latency: "~10ms"
+        best_for: "Default choice — cost-efficient, high-volume, real-time"
+      text_embedding_3_large:
+        dimensions: 3072
+        mteb_score: "64.6%"
+        cost: "$0.00013 / 1K tokens (6.5× more expensive than small)"
+        latency: "~29ms"
+        best_for: "Maximum accuracy, complex linguistic structures, multi-language retrieval"
+      text_embedding_ada_002:
+        status: "Legacy — do not use for new systems"
+        cost: "$0.0001 / 1K tokens (5× more expensive than 3-small, lower performance)"
+    matryoshka_dimension_reduction:
+      what: "text-embedding-3 models support dimensions parameter via Matryoshka Representation Learning"
+      key_insight: "text-embedding-3-large at 256 dimensions STILL outperforms ada-002 at 1536 dimensions"
+      dimension_tradeoffs:
+        "3072 (full)": "64.6% MTEB — maximum accuracy"
+        "1536": "~64.0% MTEB — 50% storage savings"
+        "1024": "~63.5% MTEB — 67% storage savings"
+        "256": "~61.5% MTEB — 92% storage savings, still beats ada-002"
+      critical_note: "When manually truncating embeddings, MUST re-normalize (L2) — cosine similarity breaks without re-normalization"
+    domain_specific_vs_generic:
+      finding: "CodeRankEmbed (code-specific dense retrieval) P@5 = 91.60% vs BM25 6.57% and generic embeddings ~60–70%"
+      rule: "For code retrieval, use a domain-specific embedding model, not a general text model"
+    similarity_metric: "OpenAI embeddings are normalized to length 1 — cosine similarity = dot product (use dot product for speed)"
+    batch_cost_optimization: "Batch API gives 50% cost discount for offline/non-realtime embedding jobs (up to 50K requests per batch, 10–20 min completion)"
+    design_rule: |
+      Default: text-embedding-3-small for all non-code, non-mission-critical retrieval.
+      Upgrade to text-embedding-3-large when accuracy difference justifies 6.5× cost.
+      For code retrieval: use domain-specific model (CodeRankEmbed or Cursor-equivalent).
+      Reduce dimensions for storage/cost: 1024 loses only 1.1pp MTEB accuracy.
+      Cache all embeddings — recomputing is pure waste.
+
+  - id: OP-8
+    name: "Vector Database Selection"
+    question: "Which vector database for what scale?"
+    source: "OPENAI_EMBEDDINGS_COMPREHENSIVE_RESEARCH_2026.md"
+    selection_by_scale:
+      development_and_prototype:
+        scale: "< 100K vectors"
+        options: "Chroma (embedded, Python-native), FAISS (library, no server)"
+        choose_when: "Speed of setup matters more than production features"
+      medium_scale:
+        scale: "100K – 10M vectors"
+        options:
+          Qdrant: "Open-source, Rust implementation, rich filtering, self-hosted or managed; best performance benchmarks"
+          Weaviate: "Open-source, native hybrid search (BM25 + vector), GraphQL API, ML pipeline integration"
+        choose_when: "Self-hosting is acceptable, hybrid search required"
+      large_scale:
+        scale: "> 10M vectors"
+        options:
+          Pinecone: "Fully managed, minimal ops, strong metadata filtering; premium pricing"
+          Milvus: "Open-source, distributed, billions of vectors; enterprise self-hosted"
+        choose_when: "Scale-critical or teams without dedicated ops (Pinecone) / massive distributed scale (Milvus)"
+    filtered_search_warning: |
+      Filtered vector search is SLOWER than unfiltered (unlike traditional databases where filters speed up queries).
+      ANN algorithms struggle with filtering constraints — pre-filtering can collapse to brute force.
+      Solution: use integrated filtering (Qdrant HNSW with filter-aware graph, Pinecone metadata slabs),
+      index frequently-filtered metadata fields, and store metadata with vectors from the start.
+    design_rule: |
+      Start with Chroma for local dev. Move to Qdrant for production self-hosted.
+      Choose Pinecone when ops burden matters more than cost.
+      Store metadata alongside vectors from day 1 — retrofitting is expensive.
+
+  - id: OP-9
+    name: "Context Rot Prevention"
+    question: "How to manage retrieval accumulation in long agent sessions?"
+    source: "RAG_SEMANTIC_INDEXING_OUTPUT_QUALITY_RESEARCH_2025_2026.md (section 7.1) + Chroma 2025 + Stanford TACL 2024"
+    the_problem: |
+      Every retrieved chunk occupies context window space. Over a long agent session,
+      accumulated retrieval artifacts push earlier architectural decisions into the
+      low-attention zone. Semantically-related content (code from the same domain)
+      causes WORSE degradation than unrelated filler because it creates plausible
+      distractors for model attention (Chroma 2025 finding).
+    validated_mitigations:
+      - name: "Summarize before injecting"
+        what: "Convert long tool outputs to compressed summaries before adding to context"
+        evidence: "SWE-ContextBench (arXiv:2602.08316): summarized context substantially outperforms full execution trajectories"
+      - name: "Lazy-load context"
+        what: "Convert retrieved content to files; reference by pointer; load only when the current step needs it"
+        evidence: "Cursor Dynamic Context Discovery pattern — keeps main context window lean"
+      - name: "Position-aware injection"
+        what: "Place most relevant retrieved content at the beginning or end of context (never middle)"
+        evidence: "Stanford Lost-in-the-Middle: U-shaped curve; middle position drops below closed-book baseline"
+      - name: "Session window management"
+        what: "Trim old retrieval artifacts before adding new ones; preserve system instructions + most recent task state"
+        thresholds: "At ~20% context: begin trimming old retrievals; at ~40% context: compress all history"
+    design_rule: |
+      Treat context as a finite budget with diminishing marginal returns.
+      Never dump raw retrieved chunks into context — always compress first.
+      Retrieve fresh, compressed, targeted context per step rather than accumulating from session start.
+      Position critical constraints and retrieved code at the beginning or end of context, never in the middle.
+    agentic_extensions:
+      cascade_corruption: "Derived conclusions become inputs; logical chain coherent at every step (see FF-7)"
+      retrieval_thrash: "Oscillating search strategies without convergence — apply hard stop (max N retrieval rounds)"
+      tool_storm: "Redundant tool calls filling window with noise — cap max M tool calls per sub-task"
+      self_distraction: "Prior reasoning rounds become distractors (HaystackCraft) — use phase boundaries"
+    failure_mode_classification: "Classify by Breunig mode (FF-6) before patching; do not add context to fix distraction/clash"
+
+  - id: OP-10
+    name: "Corpus Precision Gate (What Makes a Good Retrieval Corpus)"
+    question: "What does the retrieval corpus need to produce quality results?"
+    source: "EMBEDDING_CORPUS_GROWTH_AND_PRECISION.md; CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026.md Part 20.2; MassiveDS (arXiv:2407.12854); FreshLLMs (arXiv:2310.03214); KATE (arXiv:2101.06804); LaMP (arXiv:2304.11406)"
+    finding: "Volume alone is not the variable — precision of retrieval (relevant × quality content × access quality) determines output quality"
+    mechanism_validated:
+      KATE: "Retrieve relevant in-context examples → inject as demonstrations → output quality improves"
+      EPR: "Retrieve semantically related examples for few-shot prompting → better task performance"
+      LaMP: "Personalized retrieval from user history → better personalized output"
+    corpus_growth_findings:
+      MassiveDS: "Larger datastores improve performance monotonically without saturation; smaller model + larger datastore outperforms larger model"
+      FreshLLMs: "Freshness matters; number and ORDER of retrieved evidence matters (newer evidence ranked higher improves accuracy)"
+    precision_enemies:
+      - name: "Power of Noise (SIGIR 2024)"
+        what: "Adding irrelevant documents actively degrades RAG accuracy — noise is not neutral"
+      - name: "Coverage gaps (arXiv:2305.14907, arXiv:2505.19426)"
+        what: "Corpus without topical coverage of the target domain fails retrieval regardless of size"
+      - name: "Corpus poisoning (arXiv:2507.08862)"
+        what: "Malicious documents injected into retrieval corpus can steer model outputs — security risk"
+    data_quality_framework:
+      source: "Wang & Strong 1996 (MIT IQ) — four dimensions consumers value"
+      accuracy: "Data is correct and free of errors"
+      completeness: "All required data is present"
+      currency: "Data is up-to-date / within relevance half-life"
+      relevance: "Data applies to the task at hand"
+      application: "These four dimensions gate corpus ingestion — a chunk that fails any one is a liability, not an asset"
+    six_condition_precision_recipe:
+      relevant: "Every document in corpus should be retrievable for at least one real query type"
+      diverse: "Covers the full domain distribution; gaps in coverage are precision killers"
+      fresh: "Time-sensitive knowledge is invalidated by staleness; build update cadence from day 1 (Wang & Strong: currency)"
+      clean: "Formatting artifacts, duplicates, and low-quality pages degrade embedding signal (Wang & Strong: accuracy)"
+      bounded: "Remove documents from domains the agent should NOT answer from (reduces confabulation)"
+      growing: "Passive static corpus decays; active growth pipeline required for sustained precision"
+    design_rule: |
+      Run corpus quality audit before assuming retrieval is working.
+      Test by querying known questions whose answers ARE in the corpus — if retrieval misses them,
+      the problem is corpus coverage or quality, not the retrieval algorithm.
+      Build a noise-filtering step (deduplication, quality score, relevance score) before ingesting.
+
+  - id: OP-11
+    name: "Data Moat via Outcome-Labeled Feedback Corpus"
+    question: "How does the agent compound knowledge over time into a sustainable advantage?"
+    source: "CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026.md Part 20"
+    core_finding: |
+      The durable advantage is not the data lake — it is a proprietary outcome-labeled feedback corpus.
+      Raw data (even large) is available to competitors. What is not available:
+      the specific input→output pairs labeled with GROUND-TRUTH OUTCOMES from closed-loop
+      operation in your specific domain.
+    data_lake_vs_moat:
+      data_lake: "Raw inputs, user queries, outputs — widely replicable, rarely moat-building"
+      data_moat: "Input + agent output + ground-truth outcome label from real-world feedback (did the code pass tests? did the recommendation convert? did the answer resolve the issue?)"
+    validated_examples:
+      Tesla_FSD: "Camera footage labeled with human correction signals → competitive advantage in edge-case detection"
+      CrowdStrike: "Endpoint telemetry labeled with malware outcomes → hard-to-replicate threat detection corpus"
+    hagiu_wright_4_conditions:
+      high_lasting_value: "The outcome-labeled data continues to be useful over time (not just for one model version)"
+      proprietary: "Cannot be replicated without operating the same system in the same domain"
+      hard_to_imitate: "Requires sustained closed-loop operation — cannot be purchased or scraped"
+      quickly_incorporated: "The model is retrained on feedback frequently enough to benefit from it"
+    model_collapse_risk:
+      paper: "Shumailov Nature 2024 (arXiv:2305.17493)"
+      finding: |
+        If synthetic data is used to train a model, and that model generates the next training set,
+        recursive synthetic data causes model collapse — the distribution degrades toward the mean,
+        rare events vanish, tails collapse.
+      design_rule: "Ground-truth labels MUST come from real-world outcomes, not from the model's own outputs."
+    security_risk: "Outcome-labeled feedback corpus is a high-value attack target — poisoned labels steer retraining toward adversary objectives"
+    velocity_equation: "Moat strength = velocity × uniqueness, not volume"
+    design_rule: |
+      Build the feedback loop BEFORE building the corpus.
+      Every agent output that can be ground-truth-labeled should be:
+        (1) stored with its input context,
+        (2) labeled with the real-world outcome (test pass/fail, task completion, user correction),
+        (3) added to the outcome-labeled corpus for retraining.
+      Never use the model's own judgment as the ground-truth label — that produces the model collapse failure mode.
+      Prioritize freshness and outcome quality over volume.
+
+  - id: OP-12
+    name: "Memory Hierarchy (6 Layers)"
+    question: "Where does each type of knowledge live in the agent system?"
+    source: "Packer 2023 (MemGPT arXiv:2310.08560); CoALA; Mem0 arXiv:2504.19413; hierarchical memory theory arXiv:2603.21564; CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026 Part 2"
+    six_layers:
+      working:
+        storage: "Context window"
+        lifetime: "Current turn / run"
+        contents: "System prompt, intent slice, recent turns, retrieved chunks, tool results"
+      episodic:
+        storage: "Chat DB + session store"
+        lifetime: "Session → cross-session"
+        contents: "Raw turns, summaries, topic state"
+      semantic:
+        storage: "Semantic embeddings"
+        lifetime: "Persistent"
+        contents: "Docs, research, patterns, quotes"
+      procedural:
+        storage: "Skills, intents, patterns"
+        lifetime: "Versioned"
+        contents: "HOW to act — intent/spec artifacts, *_patterns.yaml, skills"
+      personal:
+        storage: "Personal archive (encrypted)"
+        lifetime: "Persistent, scoped to user"
+        contents: "User-specific private memory"
+      external_jit:
+        storage: "APIs, MCP, grep, files"
+        lifetime: "On demand"
+        contents: "Fresh data, execution results"
+    design_rule: |
+      Working memory holds pointers + summaries; bulk data stays external until JIT-loaded.
+      Classify every knowledge type to its layer before deciding how to store or retrieve it.
+      Procedural (intent artifacts/patterns) is T0/T1 — always loaded. Semantic corpus is T3 — retrieved on demand.
+
+  - id: OP-13
+    name: "Write / Select / Compress / Isolate (Four Context Operators)"
+    question: "What are the canonical operations for managing context?"
+    source: "Anthropic Sep 2025; LangChain 2025; CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026 Part 3"
+    operators:
+      write:
+        purpose: "Persist outside the window"
+        techniques:
+          - "Structured notes: project notes, todo lists, intent/spec artifacts"
+          - "Memory extraction: Mem0-style salience filter — store facts, not raw transcripts"
+          - "Scratchpads: tool-accessible files; conclusions only re-enter context"
+          - "Outcome logs: outcome feedback loop pattern — label what worked/failed for future retrieval"
+        evidence: "Mem0: +26% vs full-history on LOCOMO benchmark (arXiv:2504.19413)"
+      select:
+        purpose: "Pull in only what the current step needs"
+        pipeline: |
+          Intent + current message + topic state
+            → Retrieval gate (7 tests, OP-1)
+            → Route by source (internal / external / tool / parametric)
+            → Rank + dedupe + truncate to budget
+            → Position for attention (critical at start/end, never middle)
+            → Inject into working memory
+      compress:
+        purpose: "Stay under token budget"
+        techniques_ordered_by_invasiveness:
+          - "Tool result clearing — drop raw tool output after step completes (Anthropic platform)"
+          - "Summarization — discourse-level, preserving decisions, open threads, constraints"
+          - "Structured compaction — OpenAI responses.compact; Claude Code 5-layer cascade"
+          - "Hierarchical memory — RAPTOR, GraphRAG-style multi-granularity summaries"
+          - "Session limit — OpenAI Agents SDK SessionSettings(limit=N)"
+        compaction_rule: "Maximize recall first (don't lose constraints/decisions), then improve precision (drop fluff)"
+      isolate:
+        purpose: "Scope context by sub-task to prevent bleed"
+        techniques:
+          - "Sub-agents return summaries (1–2K tokens), not full traces"
+          - "ScopedContextPackage — domain-scoped slice, not orchestrator blast"
+          - "Skill context: fork — isolated subagent window"
+          - "MCP resource per domain — expose only relevant tool/data surface"
+    design_rule: |
+      Apply operators in order: Write (what to persist) → Select (what to load) → Compress (what to trim) → Isolate (what to scope).
+      Never conflate — each operator has a distinct failure mode when skipped.
+
+  - id: OP-14
+    name: "Intent-Driven Context Profiles"
+    question: "How should context assembly differ by task type?"
+    source: "CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026 Part 4"
+    intent_dimensions:
+      stakes: "Provenance required? → force retrieval + citations"
+      freshness: "Post-cutoff / live data? → tools/MCP over parametric"
+      privacy: "User/org data? → personal archive + encrypted store"
+      reasoning_vs_lookup: "Skill task → minimal retrieval; fact task → maximal grounding"
+      horizon: "Single turn vs multi-hour → compaction + notes vs full history"
+      domain: "Code vs conversation vs finance → different retrieval routes"
+    profiles:
+      profile_A_reasoning_craft:
+        examples: "Write article, refactor with spec"
+        context: "Parametric + provided input is the context"
+        retrieve: "Intent artifact, patterns, 1–3 exemplars only"
+        skip: "Broad RAG unless explicit fact gap"
+        hygiene: "No tool dump; summarize prior turns lightly"
+      profile_B_grounded_qa:
+        examples: "What did we decide about X?"
+        context: "Chat episodic + semantic retrieval + topic state"
+        gate: "Adaptive — if head knowledge + confident, skip semantic retrieval"
+        hygiene: "Cite source layer (chat vs semantic corpus vs tool)"
+      profile_C_live_fresh:
+        examples: "Stock price, Trello state"
+        context: "Tools first — never parametric for mutable state"
+        hygiene: "TTL on cached tool results; mark stale explicitly"
+      profile_D_long_horizon_agent:
+        examples: "Migration, research sweep"
+        context: "Compaction every N tokens or M tool calls; structured notes"
+        hygiene: "Sub-agents for exploration; parent keeps plan + summaries only; clear tool results"
+      profile_E_persona_eval:
+        examples: "Reviewer persona, investor persona"
+        context: "RAG over grounded quotes + outcome-labeled history"
+        hygiene: "Decay stale persona facts; human validation loop; never persona-only without retrieved evidence"
+    design_rule: |
+      Select profile before assembling context — not a one-size context assembly call.
+      Profile determines: which layers to load, which to skip, what hygiene to apply, and what budget to allocate.
+
+  - id: OP-15
+    name: "Token Budget Allocation + Prompt Caching Architecture"
+    question: "How to allocate the context window and structure for provider cache hits?"
+    source: "Atlan 2026; llmbestpractices.com; Anthropic + OpenAI caching docs; CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026 Part 13"
+    default_budget_split:
+      description: "For 200K window agent — adjust by intent profile"
+      system_and_procedural: "10–15% (stable; cacheable)"
+      tool_definitions_selected: "10–15% (tool RAG first — never full registry)"
+      conversation_history: "25–30% (raw recent + topic summary)"
+      retrieved_evidence: "25–30% (hard cap; k=1–3 default)"
+      tool_results_current_step: "10–15% (clear after step)"
+      response_headroom: "15–20% (never steal from this)"
+    enforcement_rule: "Enforce in code before every LLM call — reject or compress lowest-priority layer first (old tool results → old history → retrieved overflow)"
+    static_dynamic_ordering:
+      static_cacheable:
+        - "System instructions"
+        - "Intent constraints (version-pinned)"
+        - "Selected tool schemas (tool RAG output)"
+        - "Few-shot examples"
+      dynamic_never_cache:
+        - "Topic state"
+        - "Retrieved chunks (this turn)"
+        - "Recent turns"
+        - "Current user message"
+        - "Tool results (this step)"
+    caching_rules:
+      - "Any edit to static prefix invalidates provider cache for everything after it"
+      - "Never put timestamps, session IDs, or per-turn retrieval in static block"
+      - "Minimum cacheable prefix: ~1,024 tokens (OpenAI + Anthropic)"
+    three_cache_tiers:
+      semantic_cache: "Identical/near-identical queries skip LLM entirely"
+      embedding_cache: "Don't re-embed unchanged chunks"
+      prompt_prefix_cache: "Provider KV reuse for static block (50–90% input cost reduction)"
+    design_rule: |
+      Order matters for both cost and constraint decay.
+      Static block first, dynamic content last. Enforce budget in code — never rely on model to manage it.
+      Short-circuit with semantic cache before embedding; embedding cache before LLM call.
+
+  - id: OP-16
+    name: "Query Transformation Routing"
+    question: "When and how to transform a query before retrieval?"
+    source: "Alex Chernysh 2026; Step-Back paper (Zheng et al. 2023); HyDE (Gao et al. 2022); FLARE arXiv:2305.06983; CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026 Part 14"
+    symptom_technique_map:
+      vague_elliptical:
+        technique: "Rewrite (clarity)"
+        cost: "1 LLM call"
+        risk: "Over-specification"
+      compound_multi_hop:
+        technique: "Decomposition → sub-queries per index"
+        cost: "1+ calls"
+        risk: "Sub-query error propagates"
+      over_specific_literal_terms:
+        technique: "Step-back (broader abstraction)"
+        cost: "1 call + 2 retrievals"
+        risk: "Misses if corpus is flat"
+      short_query_long_docs:
+        technique: "HyDE (hypothetical doc embed)"
+        cost: "1 call + embed"
+        risk: "Retrieves around wrong hypothetical — use cautiously"
+        amplification_failure_mode: >
+          A wrong assumption in the hypothetical document is amplified, not corrected:
+          the embedding finds more documents that validate the wrong assumption, creating a
+          retrieval loop that confirms the error. Distinct from 'generates around wrong hypothesis'
+          (which is about specificity) — this is about wrong-premise feedback amplification.
+          (CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026 Part 14)
+      multiple_useful_variants:
+        technique: "Multi-query + RRF"
+        cost: "N retrievals"
+        risk: "Volume → confusion if not reranked"
+      messy_corpus:
+        technique: "Fix ingestion first"
+        cost: "—"
+        risk: "No transform fixes bad chunks"
+    agentic_rag_loop: "Agent chooses transform based on first retrieval confidence (FLARE: retrieve when generation confidence drops mid-stream)"
+    recommended_defaults:
+      first: "Continuation-query enrichment (topic state) before any transform"
+      second: "Decomposition for cross-domain questions (semantic corpus + chat + tools)"
+      last: "HyDE only when enrichment + direct embed both under threshold"
+    design_rule: |
+      Always try enrichment with topic state first — it's free and handles most continuation queries.
+      Only apply expensive transforms (decomposition, HyDE) when enrichment fails.
+      Never use HyDE when the query is already specific — it generates around the wrong hypothesis.
+
+  - id: OP-17
+    name: "Trust Boundary Levels (T0–T4) + Context Security"
+    question: "How to handle the fact that models don't distinguish instruction from data in context?"
+    source: "MCP threat model arXiv:2603.22489; CVE-2025-54136; OWASP LLM01; RAG poisoning arXiv:2507.08862; CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026 Part 15"
+    trust_levels:
+      T0_binding:
+        source: "System prompt, binding constraints"
+        model_treatment: "Instruction"
+        integration_guidance: "Human-authored; version-pinned"
+      T1_procedural:
+        source: "Patterns, skills"
+        model_treatment: "Instruction"
+        integration_guidance: "Distilled from research; no raw research MD"
+      T2_verified_data:
+        source: "Tool results from owned APIs, passing schema"
+        model_treatment: "Data"
+        integration_guidance: "Structured JSON; TTL enforced"
+      T3_retrieved:
+        source: "Semantic corpus, web, RAG"
+        model_treatment: "Untrusted data"
+        integration_guidance: "Wrap in <retrieved source='...'>; never merge into system"
+      T4_external_tool:
+        source: "MCP third-party, web scrape"
+        model_treatment: "Hostile until proven"
+        integration_guidance: "Pin tool inventory at session start; post-exec output scan"
+    attack_vectors:
+      tool_description_poisoning:
+        mechanism: "Malicious text in MCP tool metadata (CVE-2025-54136)"
+        mitigation: "Pin schemas; gateway inspect; allowlist servers"
+      tool_output_injection:
+        mechanism: "Free-text response treated as instruction (OWASP LLM01)"
+        mitigation: "Separate privilege tiers; external-text tools never co-context with write tools"
+      rag_poisoning:
+        mechanism: "Adversarial chunks in vector store (arXiv:2507.08862)"
+        mitigation: "Ingestion gate; corpus curation; outcome-labeled trust scores"
+      rug_pull:
+        mechanism: "Benign tool later changes behavior"
+        mitigation: "Re-validate schema each session"
+      compaction_amplification:
+        mechanism: "Poisoned fact summarized into 'trusted' summary"
+        mitigation: "Quarantine before write; human gate for memory extract"
+    mcp_threat_scale: "57 threats across host/client/LLM/server/data/auth; 34% tampering + information disclosure (arXiv:2603.22489)"
+    design_rule: |
+      Label trust level at injection time — T0 through T4.
+      Never let T3/T4 content overwrite T0 constraints. Conflict → explicit clash flag to user, not silent merge.
+      Tool poisoning is a structural problem, not a prompt-layer one.
+
+  - id: OP-18
+    name: "Tool RAG — Dynamic Tool Selection"
+    question: "How to handle large tool registries (50+ tools) without confusing the model?"
+    source: "Toolshed SCITEPRESS 2025; ToolReAGt ACL KnowLLM 2025; Red Hat ET Nov 2025; Anthropic RAG-MCP; CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026 Part 17"
+    problem: "100+ MCP tools in prompt → context confusion (Breunig). Llama 3.1 8B fails at 46 tools, succeeds at 19 — overlapping tool descriptions amplify clash."
+    tool_rag_pipeline: |
+      User intent + task decomposition
+        → Embed against tool knowledge base (enhanced docs: name, description, params, examples, constraints, side-effect class)
+        → Hybrid retrieve top-k tools (k=3–7 typical; BoR adaptive K on hard queries)
+        → Rerank / self-correct (ToolReAGt: +8.9% recall@5 vs one-shot)
+        → Merge redundant tools (ToolScope)
+        → Causal filter by preconditions (CMTF: ~100→1 tools/step)
+        → Inject ONLY selected schemas into static tool block
+        → Iterative: re-retrieve per sub-task in long chains (ToolOmni: proactive retrieval during reasoning loop)
+    advanced_selection_methods:
+      source: "WORLD_MODEL_TOOL_ROUTING_RESEARCH_2026.md"
+      regime_table:
+        small_registry: "~15 tools → shortlist K 3–5; genuine selection still possible"
+        medium_registry: "~50 tools → shortlist K 8–15; grey zone, recall vs noise"
+        large_registry: "100+ tools → fixed small K; collapse — random inclusion dominates unless retrieval is good"
+      cmtf:
+        paper: "arXiv:2606.06284 — Causal Minimal Tool Filter"
+        mechanism: "Only expose tools whose preconditions match current state. ~100→1 tools/step, ~90% token cut, same success rate."
+        when: "Step-wise filtering inside a chain where most tools are irrelevant to the current step"
+      bor_adaptive_k:
+        paper: "arXiv:2605.24660 — How Many Tools Should an LLM Agent See? (Bits-over-Random)"
+        mechanism: "Adaptive shortlist depth K per query vs fixed K. Better coverage on hard queries (ToolBench 3251 tools)."
+        rule: "Do not use a single fixed K — scale K with query difficulty"
+      toolscope:
+        paper: "ToolScope ACL 2026 (long 1573)"
+        mechanism: "Merge redundant tools + context-aware retrieval. +8–39% selection accuracy."
+        when: "Sibling tools with overlapping descriptions amplify context clash (~39% drop) — merge or differentiate"
+      toolomni:
+        paper: "ToolOmni ACL 2026 (long 1736)"
+        mechanism: "Proactive retrieval during the reasoning loop (not one-shot upfront). SOTA open-world tool use."
+        when: "Long chains where sub-task tool needs are not knowable at turn start"
+    description_quality:
+      source: "Anthropic Agent Skills research; WORLD_MODEL_TOOL_ROUTING_RESEARCH_2026.md"
+      primary_signal: >
+        ~80% of auto-invocation reliability comes from DESCRIPTION quality, not body content.
+        The description is the primary selection cue — a correct tool with a vague description
+        is a tool the model will not reliably call.
+      naming: "name = {verb}_{object}_{scope}, unambiguous among siblings (search_games_by_genre, NOT games)"
+      description_shape: "First sentence = exact trigger condition; second sentence = negative boundary (when NOT to use)"
+      route_here_pattern: >
+        For agent-as-tool wrappers, include explicit 'Route here for …' / 'NOT for …' in every
+        description (tool-routing research, 2026). Negative boundaries reduce
+        wrong-tool calls more than positive examples.
+      overlap_rule: "Overlapping sibling descriptions amplify context clash — merge (ToolScope) or differentiate; never ship two near-identical descriptions"
+      agent_description_weakness: "Known agent production weakness: generic descriptions like 'X agent for specialized tasks (Y tools)' — still unfixed in metadata; highest-ROI description fix"
+    reported_gains:
+      anthropic_rag_mcp: "13% → 43% tool selection accuracy"
+      red_hat: "~3× accuracy + ~50% prompt reduction"
+      toolshed: "+46–56% absolute over BM25 on benchmarks"
+      llama_3_1_8b: "Fails at 46 tools, succeeds at 19 ('Less is More') — small models collapse earlier"
+    lazy_loading_finding:
+      source: "Cursor Dynamic Context Discovery A/B test (Jan 2026)"
+      technique: "Load MCP tool schemas on-demand (agent requests by name) vs injecting all upfront"
+      result: "46.9% total token reduction in sessions that called ≥1 MCP tool"
+      why: "MCP schemas are 150–400 tokens each; most tools in any session are never called — upfront injection pays the cost with zero benefit"
+      mechanism: "Agent receives tool names + one-line descriptions as static context; fetches full schema by name only when needed for that sub-task"
+    selection_eval:
+      source: "BFCL V4 ICML 2025; WORLD_MODEL_TOOL_ROUTING_RESEARCH_2026.md"
+      format_sensitivity: >
+        BFCL V4 'agentic chasm': models score high on single-turn calls, much lower on
+        multi-hop web search + error recovery, memory, and format sensitivity — the SAME
+        tool with a different JSON schema shape (renamed params, reordered fields) can flip
+        a passing call to a failing one. Tool-selection accuracy is not schema-invariant.
+      v4_scoring_weights: "Agentic 40% + Multi-Turn 30% + Live 10% + Non-Live 10% + Hallucination 10%"
+      minimum_viable_eval:
+        routing: "N held-out prompts → correct domain agent (≥95% on curated set)"
+        tool_selection: "Within agent, correct function among K tools (≥90%)"
+        fresh_vs_reference: "Repeated identical web-search prompt → tool called both times (no chat-history shortcut)"
+        schema_robustness: "Same tool, perturbed param names in schema — still works"
+        chain: "Multi-step pipeline → external oracle on final artifact"
+        spill: "50K-token tool output → agent can grep spilled file"
+      oracle_rule: "Use execution-derived oracles — not LLM-as-judge alone"
+    design_rule: |
+      Never pass full tool registry to the orchestrator.
+      Route: intent profile → domain tool subset → optional semantic tool retrieve.
+      Build a tool knowledge base (enhanced tool docs) and index it separately from the conversation corpus.
+      Re-retrieve tools per sub-task for iterative agent loops.
+      For MCP-heavy sessions: provide names+descriptions only; lazy-load full schemas on demand → ~47% token reduction.
+      Regression-test tool selection for schema robustness — format sensitivity silently breaks calls (BFCL V4).
+
+  - id: OP-19
+    name: "Negative Selection — What NOT to Include in Context"
+    question: "What content should be actively excluded from the context window?"
+    source: "Breunig Jun 2025; O'Reilly; CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026 Part 19"
+    exclude_table:
+      failed_tool_outputs: "Confusion + clash with success path — log externally, never re-inject"
+      early_wrong_attempts: "Context confusion (Breunig) — remove assistant attempts that failed validation"
+      superseded_retrieved_chunks: "Stale clash — only re-include if user explicitly asks for history"
+      full_research_md_in_prompt: "Distraction; use patterns YAML (T1) instead of raw research (T3)"
+      duplicate_near_identical_chunks: "Wasted tokens — dedupe at merge before injection"
+      parametric_filler_when_retrieving: "Clash with grounded answer — strip after retrieval inject"
+      other_agents_full_traces: "Scope bleed — summary + citations only"
+      unverified_mem0_extractions: "Poisoning risk — hold until human or oracle confirms"
+      raw_env_secrets: "Never in context — structured redacted refs only"
+    negative_retrieval: |
+      Store 'anti-patterns' and failed approaches with outcome: failed label.
+      Retrieve to AVOID, not to repeat. The outcome corpus should support outcome: failed filter.
+    design_rule: |
+      Context quality is as much subtraction as addition.
+      Maintain an explicit exclusion list alongside retrieval pipeline.
+      Distillation path: research MD → patterns YAML → prompt constants → intent artifacts (T0).
+      Never inject raw research when distilled patterns exist.
+
+  - id: OP-20
+    name: "Active Context Management (beyond passive compress)"
+    question: "How to go beyond summarize-on-threshold for long-horizon agent context?"
+    source: "ARC ACL Findings 2026; AdaCoM arXiv:2605.30785; ActiveContext arXiv:2604.11462; Context-ReAct/LongSeeker arXiv:2605.05191; Sculptor arXiv:2508.04664; CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026 Part 23"
+    passive_vs_active:
+      append_only: "Raw history grows → distraction, clash, cost"
+      passive_summarize: "Compress at threshold → cements errors; can't purge mid-history"
+      keep_last_k: "Drop old turns → loses constraints silently"
+      active_curation: "Agent decides prune/hide/restore/search → requires policy or learned manager"
+    frameworks:
+      ARC_ACL_2026:
+        idea: "Reflection-driven revisable internal state; separate Context Manager"
+        result: "+11% absolute on BrowseComp-ZH vs passive summarize"
+      AdaCoM_arXiv_2605_30785:
+        idea: "Learned manager; agent-compatible compression rate"
+        result: "Stronger agents keep more raw context; weaker agents need eager distillation"
+      ActiveContext_arXiv_2604_11462:
+        idea: "RL-trained ContextCurator + frozen TaskExecutor"
+        result: "Decouples memory ops from reasoning capacity"
+      Sculptor_arXiv_2508_04664:
+        idea: "ACM tools: fragment, summary/hide/restore, precise search"
+        result: "Mitigates proactive interference — old irrelevant context disrupts recall"
+    fidelity_reliability_tradeoff:
+      stronger_agents: "GLM, Qwen: tiered strategy — let context grow, occasional batched compress (~5–7K tokens managed)"
+      weaker_agents: "DeepSeek, Kimi: eager distillation every round (~1.9–3.4K tokens)"
+      rule: "Compaction aggressiveness must be model-calibrated, not a global constant"
+    practical_near_term:
+      hide: "Tool output replaced by one-line pointer after step success"
+      restore: "On 'show earlier X', grep recovery table / file"
+      purge_failed_branch: "Remove assistant attempts that failed validation (OP-19)"
+      reflection_trigger: "When retrieval confidence drops or tool errors repeat, run ARC-style 'reorganize working state' prompt"
+    design_rule: |
+      Passive summarization on threshold is insufficient for long-horizon agents — it cements errors
+      and can't purge mid-history mistakes.
+      Implement rule-based active ops (hide/restore/purge) before considering RL-trained ContextCurator.
+      Calibrate compaction aggressiveness per model — Opus policy on a fast sub-agent may discard needed evidence.
+
+  - id: OP-21
+    name: "Embedding Drift Monitoring"
+    question: "How to detect when the semantic index's retrieval quality degrades silently?"
+    source: "Azure AI Foundry 2025; Tian Pan Apr 2026; decompressed.io 2025–2026; CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026 Part 24"
+    critical_gap: "Embedding drift throws no errors — recall erodes over weeks. Standard ops dashboards (CPU, latency, error rate) miss this entirely."
+    three_drift_sources:
+      model_version_change: "New docs in different vector space than old (5–15% cosine shift can reorder top-k)"
+      chunking_preprocessing_change: "Mixed strategies in same index"
+      corpus_query_distribution_shift: "World changes; scores drift left over ~6 weeks without code changes"
+    detection_signals:
+      run_weekly_on_golden_query_set:
+        top_1_score_mean: "Healthy: stable band; Degrading: −0.05 over 4 weeks; Broken: −0.10+"
+        top_1_minus_top_5_spread: "Healthy: clear winner; Degrading: flattening; Broken: random ranking"
+        nn_stability: "Healthy: 85–95% overlap week-over-week; Degrading: 70–85%; Broken: <70%"
+        ndcg_at_k: "Healthy: flat or up; Degrading: down 2+ weeks; Broken: down 5+ pts"
+    prevention_discipline:
+      pin_pipeline: "Model version + chunk size + overlap + preprocessor — version tag on every vector"
+      never_mix_generations: "Partial re-embed is how drift starts — new model = new index"
+      model_upgrade_as_migration: "Shadow index → benchmark golden set → cutover"
+      planned_reindex: "Re-embed full corpus 3–4×/year (planned, not panic response)"
+    design_rule: |
+      Maintain benchmark_queries.yaml (20–50 labeled queries) + weekly cron score report.
+      Never upgrade the embedding model without migrating the full corpus.
+      Drift is silent — no alert from standard monitoring. Golden query set is the only signal.
+
+  - id: OP-22
+    name: "Temporal RAG + Conflict Resolution"
+    question: "How to handle stale vs. current documents in the retrieval corpus?"
+    source: "ConflictRAG arXiv:2605.17301; SmartVector arXiv:2604.20598; VersionRAG (Huwiler et al.); T-GRAG ACM MM 2025; CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026 Part 29"
+    problem: |
+      Standard RAG ranks by semantic similarity, not validity interval. A 2024 policy doc can
+      outrank the 2026 update because wording is more similar to the query.
+      VersionRAG benchmark: naive RAG 58% vs version-aware pipeline 90% on version-sensitive questions.
+    conflict_types:
+      factual: "Detect pair; prefer verified/tool-grounded source"
+      temporal: "Rank by valid_from / doc date; note evolution"
+      opinion: "Multi-perspective synthesis + attribution (hardest: ConflictRAG F1 0.685)"
+      no_conflict: "Merge normally"
+    conflict_detection: "ConflictRAG two-stage detector: 88.7% F1 binary detection; type classification harder on opinion"
+    cross_turn_clash_cost:
+      finding: >
+        ~39% performance drop when contradictory information is injected across turns without
+        explicit conflict resolution (Microsoft/Salesforce via Turing College 2025). Distinct from
+        within-document contradiction: clash is concurrent contradiction across multiple conversation
+        turns, where each turn's information is coherent but the turns conflict with each other.
+      design_rule: "Adding more context does not resolve cross-turn clash — it amplifies it.
+        Detect and resolve before injection, never after."
+      source: "CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026 Part 9"
+    production_patterns:
+      phase_1_metadata_first:
+        - "Every corpus chunk: source_path, indexed_at, doc_date, supersedes, intent_version"
+        - "Filter: doc_date >= cutoff OR status: current for mutable domains"
+        - "On clash: inject both with dates + rule 'prefer newer verified source'"
+      phase_2_graph_temporal:
+        - "T-GRAG ACM MM 2025: time-stamped graph + temporal query decomposition"
+        - "SmartVector: confidence decay + consolidation cron + contradiction edges"
+      fail_closed_high_stakes:
+        - "Abstain if temporal consistency check fails"
+        - "Never write unresolved conflicts to Mem0 as facts (quarantine)"
+    design_rule: |
+      Add temporal metadata at ingest time (doc_date, supersedes, status).
+      Filter by date before semantic ranking — not after.
+      Never let a stale doc win by semantic similarity alone; inject both and let the model note the evolution.
+
+  - id: OP-23
+    name: "Context Observability (Trace Fields per LLM Call)"
+    question: "How to debug 'why did the agent believe X?' without LangSmith dependency?"
+    source: "LangSmith pattern; LangChain blog; CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026 Part 26"
+    trace_fields_per_llm_call:
+      token_breakdown: "system / tools / history / retrieved / user / tool_results"
+      retrieval_queries: "Actual embed/search strings (post-enrichment, post-transform)"
+      retrieved_chunk_ids: "Corpus paths + scores + trust level (T0–T4)"
+      retrieval_gate_result: "7-test pass/fail per test (OP-1)"
+      compaction_event: "What was dropped vs preserved"
+      trust_tags: "T0–T4 per injected block"
+      topic_state_snapshot: "Active/abandoned topics at call time"
+      session_id_thread_id: "Cross-turn grouping"
+    debug_workflow:
+      step_1: "Classify failure mode (FF-6) — poison / distract / confuse / clash / cascade"
+      step_2: "Ablation from trace — re-run with layer removed (no semantic corpus, no history, no tools)"
+      step_3: "Retrieval post-mortem — were right chunks in top-k? Wrong chunks scored higher?"
+      step_4: "Compaction audit — was lost constraint in dropped segment?"
+      step_5: "Feed to outcome corpus — outcome label + root cause layer → outcome-labeled store"
+    minimum_viable: |
+      Log context assembly output manifest (source, path, tokens, score) per orchestrator turn.
+      Enables 'why did agent not see X?' without LangSmith dependency.
+      Store as structured JSON alongside orchestrator turn in session store.
+    design_rule: |
+      No context architecture decision from retrieval-only nDCG alone — requires end-to-end trace.
+      Minimum viable: log context assembly manifest. Full: all 8 trace fields above per turn.
+      Without observability, debugging context failures is guesswork.
+
+  - id: OP-24
+    name: "Context Compression Priority Tiers + Multi-Cue Retrieval"
+    question: "Which information should survive context compression, and how to trigger reliable recall?"
+    source: "context/CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026.md (topic switching, neuroscience synthesis)"
+    compression_tiers:
+      high_retain:
+        - "Partner facts (name, role, stated preferences, domain knowledge)"
+        - "Commitments and decisions made during conversation"
+        - "Emotional states and relationship-defining moments"
+        - "Unresolved questions and pending action items"
+      medium_gist:
+        - "Topic themes and problem framing"
+        - "Arguments and reasoning chains (compressed to conclusions)"
+      low_discard:
+        - "Exact wording and phrasing (retain only when literal wording matters)"
+        - "Filler, backchannels, pleasantries"
+        - "Redundant or superseded information"
+    retrieval_cue_types:
+      semantic: "Content similarity — what the chunk is about"
+      temporal: "Time-based — when in the conversation it occurred"
+      participant: "Speaker/source identity — who said it"
+      emotional: "Affective state at encoding — tone and valence"
+      event: "Situational marker — what was happening at encoding"
+    key_finding: |
+      Computationally optimized cues (semantic + temporal + participant combination)
+      significantly outperform random cue selection. Random cues can actively impair
+      recall below baseline. Context reinstatement — matching retrieval context to
+      encoding context across temporal/emotional/semantic/social dimensions — is the
+      strongest recall lever.
+    production_comprehension_asymmetry:
+      finding: >
+        Yamashita et al. (Nature Human Behaviour 2025): production (generating response) uses
+        shorter-timescale context (1–4s, immediate); comprehension (parsing extended user input)
+        integrates longer-timescale context (16–32s, discourse-level). The same context window
+        serves two asymmetric processing needs.
+      design_implication: >
+        Response generation uses recent immediate context — prioritize last few turns in
+        compression. Parsing multi-paragraph user input requires full discourse context —
+        never compress user's current message, only prior history.
+      source: "Yamashita et al., Nature Human Behaviour 2025; topic-switching research"
+    minimum_viable: |
+      Tag high-retain items explicitly during ingestion (commitments → action_items,
+      partner facts → profile fields, emotional moments → sentiment_events).
+      Use multi-cue retrieval: always combine semantic + participant + temporal signals
+      rather than semantic alone.
+    design_rule: |
+      Compression should preserve structural information (commitments, decisions,
+      partner facts) over surface information (exact wording, pleasantries).
+      Retrieval should combine ≥3 cue types — semantic-only retrieval misses
+      temporally or emotionally indexed memories that pure embedding search cannot surface.
+
+  - id: OP-26
+    name: "Incremental Corpus Maintenance"
+    question: "How to keep a retrieval index current without full re-indexing costs on every change?"
+    source: "Cursor secure-codebase-indexing blog; Cursor semsearch blog; Turbopuffer case study; SEMANTIC_INDEXING_CURSOR_VS_COPILOT_DEEP_DIVE_2026.md sections 2.4–2.6"
+    three_techniques:
+      content_hash_embedding_cache:
+        what: "Key each chunk's embedding in cache by SHA-256 of chunk content. On index refresh, only chunks whose content hash changed need re-embedding."
+        why: "Most files in a corpus don't change between refresh cycles. Re-embedding unchanged chunks wastes embedding API cost and latency."
+        mechanism: "Compute chunk content hash → cache lookup → hit: reuse stored vector; miss: embed + store"
+        result: "Cursor: most updates process only the few chunks that actually changed in each ~5-minute refresh cycle"
+      change_detection_before_full_scan:
+        what: "Use a hash tree (Merkle-style) over corpus to detect which files changed in O(k log n) instead of O(n) full scan"
+        mechanism: |
+          Each file leaf = SHA-256 of file content.
+          Each directory node = hash of children (sorted for cross-OS consistency).
+          On update: only branches where hashes differ need traversal.
+          Result: walk only changed subtrees, not the entire corpus.
+        when_to_use: "Any corpus with >1,000 files where frequent incremental updates are needed"
+        cursor_scale: "50,000-file repo: 3.2 MB of hashes; Merkle walk eliminates reading unchanged subtrees entirely"
+      cross_instance_index_reuse:
+        what: "When a new user/environment has a corpus highly similar (≥90%) to an existing indexed instance, copy the existing index and reconcile the delta instead of building from scratch"
+        mechanism: "Compute corpus fingerprint (simhash of file content hashes) → search existing indexes for similarity → copy nearest match → apply delta (add/remove/update changed chunks only)"
+        latency_gain: "Cursor: median initial index time 7.87s → 525ms; 99th percentile 4.03 hours → 21 seconds"
+        applicability: "Teams sharing a codebase, multi-environment deployments, staging vs. prod with similar codebases"
+    minimum_viable: |
+      Phase 1: Implement content-hash keyed embedding cache — cheapest win, immediate cost reduction.
+      Phase 2: Add change detection scan before full corpus refresh — skip re-embedding unchanged docs.
+      Phase 3: Cross-instance reuse if the agent runs multi-environment or supports multi-user corpus snapshots.
+    design_rule: |
+      Full corpus re-embedding on every change is a trap — it scales O(n) with corpus size.
+      Content-hash caching converts re-indexing from O(n) to O(k) where k = changed chunks.
+      Change detection converts the scan itself from O(n) to O(k log n).
+      Combined: a 50,000-document corpus with 10 daily changes costs ~10 embeddings, not ~50,000.
+
+  - id: OP-25
+    name: "RAG Paradigm Router"
+    question: "Which RAG architecture to use — and when to skip retrieval entirely?"
+    source: "RAGRouter-Bench arXiv:2602.00296 (7,727 queries × 21,460 docs × 5 paradigms); CA-RAG arXiv:2606.02581; Milvus routing SOP ~2026; RAG_ROUTING_AND_PARADIGM_SELECTION_2026.md"
+    paradigms:
+      llm_only:
+        use_when: "Query is answerable from parametric knowledge; no private corpus needed"
+        cost: "Cheapest — zero retrieval overhead"
+      naive_rag:
+        use_when: "Single-fact lookup in flat, low-connectivity index"
+        cost: "1 embed + k-NN search"
+      graph_rag:
+        use_when: "Entity-heavy corpus with high connectivity (relationships matter)"
+        cost: "Graph traversal — higher latency, higher accuracy on relational queries"
+      hybrid_rag:
+        use_when: "Mixed/relational corpus; default when corpus type is uncertain"
+        cost: "Dense + sparse combined; moderate overhead"
+        ragrouter_finding: "Wins most slices across RAGRouter-Bench — safe default"
+      iterative_rag:
+        use_when: "Analytical or multi-hop queries requiring chained retrieval steps"
+        cost: "Multiple rounds — highest latency, highest accuracy for complex reasoning"
+    routing_decision_tree: |
+      IF answerable from parametric knowledge AND no private corpus:
+          → LLM-only (skip retrieval)
+      ELIF single-fact lookup in flat index:
+          → NaiveRAG, shallow k
+      ELIF relational / entity-heavy corpus (high connectivity):
+          → GraphRAG or HybridRAG
+      ELIF analytical / multi-hop:
+          → IterativeRAG or deep HybridRAG
+      ELSE:
+          → HybridRAG shallow → escalate depth on verifier fail
+    corpus_structure_features:
+      hubness: "Degree distribution — high hubness → GraphRAG advantage"
+      dispersion: "How spread the relevant content is — high dispersion → Hybrid"
+      connectivity: "Entity relationship density — high connectivity → Graph/Hybrid"
+      note: "Router features = query type + corpus structure, NOT query length alone"
+    ca_rag_cost_function:
+      formula: "utility = quality − α·latency − β·tokens"
+      result: "26% fewer tokens at equal quality vs always-heavy pipeline (28-query benchmark)"
+      implication: "Calibrate α and β per use case; routing to skip/shallow is highest-ROI change"
+    ordering_rule: "RAG router → context packaging → LLM tier. Wrong RAG makes every model look dumb — fix architecture before upgrading model."
+    rag_model_interaction:
+      over_retrieve:
+        symptom: "Noise, cost spike"
+        wrong_fix: "Bigger LLM"
+        right_fix: "Shallow k or LongLLMLingua compression"
+      under_retrieve:
+        symptom: "Hallucination"
+        wrong_fix: "Bigger LLM"
+        right_fix: "Deeper k or HybridRAG"
+      wrong_paradigm:
+        symptom: "Missed relational facts"
+        wrong_fix: "Upgrade to Opus"
+        right_fix: "Switch to Graph/Hybrid paradigm"
+      stale_index:
+        symptom: "Wrong / outdated facts"
+        wrong_fix: "More capable model"
+        right_fix: "Reindex + embedding version lock"
+    design_rule: |
+      Never fix a RAG architecture problem by upgrading the model — diagnose the retrieval layer first.
+      Route before choosing LLM tier. Default to HybridRAG shallow; escalate paradigm and depth
+      only when verifier signals failure. Routing queries that don't need retrieval is the
+      highest-ROI single change for most production systems.
+
+  - id: OP-27
+    name: "Compression-Only Memory Architectures"
+    question: "When should memory be managed through compression alone rather than retrieval from an external store?"
+    source: "context/CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026.md §3.2"
+    core_finding: >
+      Three 2025 architectures achieve SOTA on long-term conversational benchmarks WITHOUT an
+      external retrieval database. The common pattern: compress in-context with structure-preserving
+      mechanisms rather than offload to a vector store. Retrieval-augmented memory is not the
+      only viable architecture for long-context agents.
+    architectures:
+      R3Mem:
+        paper: "arXiv:2502.15957 (2025)"
+        mechanism: "Reversible compression using virtual memory tokens at document/paragraph/sentence/entity
+          levels. Full originals are reconstructable from the compressed form (lossless compression)."
+        result: "SOTA on conversational benchmarks"
+        key_distinction: "Lossless — distinct from lossy summarization. No retrieval DB needed."
+      CCM:
+        paper: "2025 (conditional LoRA)"
+        mechanism: "Compresses attention KV cache using conditional LoRA training rather than
+          truncating or summarizing context."
+        result: "Full-context-comparable performance at 5× lower memory"
+        key_distinction: "Model-level KV cache compression, not prompt-level summarization"
+      COMEDY:
+        paper: "ACL COLING 2025"
+        mechanism: "Single LLM manages memory generation, compression, and response with no
+          external retrieval database."
+        result: "Outperforms retrieval-based memory approaches on long-term real-world conversations"
+        key_distinction: "No external vector store — single-model compression beats retrieval-augmented memory"
+    design_rule: |
+      Do not default to vector-store-plus-retrieval for memory. For conversational agents:
+      benchmark compression-only architectures first. COMEDY result specifically contradicts
+      the assumption that retrieval always improves long-term conversation quality.
+      Use vector store when: corpus is large, queries are ad-hoc, or domain knowledge
+      (not conversation history) is the primary retrieval target.
+  - id: OP-29
+    name: "Context Assembler: Deterministic Minimal-Package Builder"
+    question: "After signals return candidates, how does the agent build the smallest sufficient context package — maximally useful, minimally long?"
+    source: "context/CONTEXT_ASSEMBLY_AND_PACKING_RESEARCH_2026.md; context/CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026.md (Parts 5, 13)"
+    definition: >
+      A pure-function pipeline: budget → MMR-select → cosine-dedup → edge-load order → emit+trace.
+      Zero generative LLM calls. Every step is a deterministic function of candidates, scores, and
+      precomputed embeddings. Same (candidates, query, budget, λ) → byte-identical package.
+    foundational_basis: "FF-11 (Du 2025: length alone degrades 13.9–85% even with perfect retrieval — fewest chunks wins)"
+    pipeline:
+      step_A_budget:
+        formula: "B = window − reserved(system + tools + history + response_headroom)"
+        default: "evidence_budget_tokens = 25–30% of window (per CONTEXT_BUILDING Part 13)"
+      step_B_mmr_select:
+        formula: "MMR = argmax_{d_i ∈ D\\S} [ λ·Sim1(d_i,q) − (1−λ)·max_{d_j ∈ S} Sim2(d_i,d_j) ]"
+        sim1: "rel_i (retrieval/rerank score, 0–1)"
+        sim2: "cos(e_i, e_j) on precomputed embeddings — NEVER re-embed on hot path"
+        lambda_presets:
+          default: 0.5
+          fact_lookup: 0.7  # relevance-heavy
+          exploratory: 0.3  # diversity-heavy
+        tie_break: "rel_i desc then candidate_id — guarantees byte-stable determinism"
+        greedy_packing: "Iteratively pick highest-MMR candidate that fits remaining budget; no knapsack (non-deterministic on ties)"
+      step_C_dedup:
+        hard_gate: "Drop any candidate with cos(e_i, e_j) ≥ 0.95 vs already-selected chunk (keep higher rel)"
+        lexical_gate: "MinHash/Jaccard ≥ 0.9 shingle check for exact text duplicates"
+        note: "MMR already suppresses near-dups via (1−λ)·max_sim term; hard gate is a safety net"
+      step_D_order:
+        principle: "Edge-load / fold ordering (Liu 2023 lost-in-the-middle: 20–30pt drop when relevant doc is in the middle)"
+        algorithm: "Sort by rel desc; assign: rank-1 → FIRST, rank-2 → LAST, rank-3 → second, rank-4 → second-to-last; weakest in the middle"
+        evidence: "LongLLMLingua independently reorders by importance for the same reason (Liu 2023 arXiv:2307.03172)"
+      step_E_emit:
+        output: "Concatenated chunks with per-chunk provenance tags (path/id/score) + trace manifest"
+        manifest_fields: "source, path, tokens, rel, mmr_score, position"
+        purpose: "Auditability artifact — missing in typical context assemblers"
+    hot_path_table:
+      - technique: "MMR selection"
+        llm_on_hot_path: false
+      - technique: "cosine/MinHash dedup"
+        llm_on_hot_path: false
+      - technique: "edge-load ordering"
+        llm_on_hot_path: false
+      - technique: "greedy budget packing"
+        llm_on_hot_path: false
+      - technique: "cross-encoder reranker (bge/MiniLM)"
+        llm_on_hot_path: false
+        note: "local discriminative, NOT generative — admissible if neural rerankers are allowed"
+      - technique: "LLMLingua / LLMLingua-2"
+        llm_on_hot_path: "conditional"
+        note: "LLMLingua = causal LM (off-path); LLMLingua-2 = encoder classifier (borderline); always build-time/async"
+      - technique: "generative summarization"
+        llm_on_hot_path: true
+        verdict: "NEVER on hot path — build-time compaction only"
+    design_rule: |
+      k=1–3 by default. Length is a cost even with perfect retrieval (FF-11).
+      Budget → MMR(λ) → dedup(cos≥0.95) → edge-load → emit+trace.
+      Embeddings are precomputed at index time; the assembler never calls an embedding model.
+      Selection and dedup are the only LLM-free compression options; token-level compression (LLMLingua family) requires a model and is build-time only.
+    ties_to: "FF-11 (length degradation basis); OP-15 (budget allocation); OP-5 (MMR already mentioned in parent-child chunking); OP-18 (cross-encoder reranker on hot path boundary)"
+
+  - id: OP-30
+    name: "Lexical Signal Adapter: Two-Mode Scan + Index"
+    question: "When the agent needs an exact-keyword / symbol / fresh-corpus match, which lexical engine backs the signal — and when should it scan vs index?"
+    source: "context/LEXICAL_RETRIEVAL_SIGNAL_RESEARCH_2026.md; context/CONTEXT_BEATS_MODEL_SEMANTIC_VS_GREP.md"
+    definition: >
+      One `LexicalSignal` interface with two adapters: a scan adapter (ripgrep, default — always fresh,
+      zero index) and an index adapter (SQLite FTS5 default / Tantivy / bm25s — BM25 ranking, persistent).
+      Both are zero-LLM, offline, deterministic. They feed the signal orchestration layer (RRF fusion)
+      alongside semantic and graph signals.
+    adapters:
+      scan_default:
+        engine: "ripgrep (rg binary)"
+        license: "MIT/Unlicense"
+        speed: "8–13× GNU grep (Rust + parallel walker)"
+        freshness: "always current — no index, no staleness"
+        ranking: "none (match positions only — not a ranking engine)"
+        implementation: "subprocess to rg binary; avoid Python regex bindings (the Rust engine is the value)"
+        use_when: "exact symbol/identifier/error string/path/regex; corpus changing constantly (OOD/fresh tokens); zero setup needed"
+      index_default:
+        engine: "SQLite FTS5"
+        license: "public domain (ships in CPython sqlite3)"
+        ranking: "BM25 k1=1.2 b=0.75, deterministic"
+        persistence: "single .db file (storage-agnostic-friendly)"
+        dependency: "zero added dep — feature-detect at startup; fallback to scan if FTS5 absent"
+        use_when: "multi-term natural-language query; large stable corpus; top-k ranked results needed"
+      index_fast:
+        engine: "Tantivy / tantivy-py (MIT, Rust)"
+        use_when: "large corpus or high churn — true incremental indexing (mmap segments, no full rebuild)"
+        cost: "compiled Rust dep (binary wheels for common platforms)"
+      index_nodb:
+        engine: "bm25s (MIT, pure Python/Numpy)"
+        use_when: "BM25 without DB file or Rust toolchain; up to 500× rank_bm25"
+        weakness: "rebuild on corpus change (eager sparse-matrix precompute)"
+      reject:
+        rank_bm25: "slowest; no persistence; bm25s dominates. Reference only."
+        whoosh: "unmaintained (original + whoosh-reloaded fork); don't build on it"
+        duckdb_fts: "viable but redundant with FTS5 unless DuckDB already embedded; no auto-update"
+    scan_vs_index_decision:
+      scan: "exact token/symbol/path/regex | corpus changing fast | OOD tokens | zero setup"
+      index: "multi-term fuzzy query | large stable corpus | top-k ranking needed for fusion"
+      rule: "Grep answers 'where does this token appear?'; BM25 answers 'which docs are most about these terms?' Run scan first for exact queries (cheap, fresh); fall to BM25 for fuzzy multi-term over stable corpus. RRF can merge both sub-signals."
+    tech_spec_constraints:
+      - "Single LexicalSignal interface; ScanAdapter + IndexAdapter implementations"
+      - "Default = scan (ripgrep) — zero index lifecycle to manage"
+      - "Index adapters expose deterministic BM25 top-k (fixed k1/b; deterministic tie-break)"
+      - "FTS5 availability feature-detected at startup; absent → scan-only graceful fallback"
+      - "No bundled mandatory dependency under a non-permissive license (excludes SSPL/BSL)"
+    design_rule: |
+      Default to scan (ripgrep) — always fresh, zero setup, deterministic.
+      Promote to BM25 index when corpus is stable and multi-term relevance ranking matters.
+      Tantivy for high-churn or large corpus needing incremental. bm25s when no DB/Rust is acceptable.
+      Never use Whoosh. Only use DuckDB FTS if DuckDB is already in the stack.
+    ties_to: "OP-1 (when to use lexical vs semantic); OP-25 (RAG paradigm router decides lexical vs dense vs hybrid); OP-29 (assembled candidates include lexical-sourced chunks)"
+
+  - id: OP-31
+    name: "Retrieval Evaluation Harness: Deterministic + LLM-Free Core"
+    question: "How do you measure whether Cairn-style retrieval actually outperforms baselines — and do it without an LLM in the scoring loop?"
+    source: "context/AGENT_RETRIEVAL_EVALUATION_RESEARCH_2026.md"
+    definition: >
+      A deterministic evaluation harness: (rankings, qrels) → scores via pytrec_eval. Classic IR metrics
+      (nDCG, Recall, MRR, MAP) require only gold relevance labels — zero LLM, zero network. LLM judges
+      stay offline for label-audit only, never on the serving path.
+    metrics:
+      primary: "nDCG@10 (graded 0–3 labels + full list ordering — captures multi-hop retrieval quality)"
+      secondary: "join-set Recall@k (did top-k contain ALL supporting docs for the multi-hop gold path?)"
+      supporting: "Recall@k, Precision@k, MRR, MAP — all deterministic given gold qrels"
+      implementation: "pytrec_eval (avoids silent DCG-variant + binarization bugs in reimplementations)"
+      llm_judges:
+        acceptable: "OFFLINE label audit only (RAGAS LLM-based, TruLens RAG Triad, ARES)"
+        banned: "any LLM judge on the retrieval serving path"
+    corpus_design:
+      scale: "target 50 queries; defensible floor 30; below ~25 = directional only"
+      stratification: "single-entity lookup | multi-hop join | temporal | unanswerable/abstention"
+      taxonomy: "borrowed from FRAMES (numerical, multi-constraint, temporal, post-processing)"
+      relevance_labels: "graded 0–3 (TREC: not/marginal/relevant/perfect); write 1-page rubric + worked example per grade"
+      multi_hop_model: "MuSiQue not HotpotQA (HotpotQA largely shortcut-solvable); hop-N requires hop-(N-1)'s answer; shortcut-resistant"
+      gold_pooling: "union top-k from 2–4 retrievers (BM25+embedding+hybrid) → judge blind → unjudged=non-relevant; avoids self-judging bias"
+      leakage_firewall: "eval queries + gold docs stay entirely out of any index-tuning/prompt/fine-tune set"
+      human_gate: "LLM may draft candidate queries (speed); human verifies EVERY gold label — ai_generated labels alone require an external oracle"
+    baselines:
+      agentic_grep: "raw ripgrep scan (OP-30 ScanAdapter)"
+      vector_rag: "dense semantic top-k (naive default)"
+      borrow_benchmarks: "BEIR/MTEB for retriever-in-isolation validation; HotpotQA/MuSiQue for gold-label schema; LongMemEval for ability taxonomy"
+      build_custom: "required — no existing benchmark has: private entity graph + cross-entity graph + deterministic gold labels + temporal/abstention abilities"
+    cost_latency_protocol:
+      latency: "p50/p95/p99 (not mean — tail dominates fan-out); retrieval and generation measured separately"
+      tokens: "tokenize final assembled context (system + chunks + separators + query) with target model's own tokenizer (tiktoken o200k_base / cl100k_base)"
+      warmup: "exclude warmup iters; report cold-start separately"
+      sample_size: "≥1k queries for stable p99; ≥10k for p99.9"
+      win_condition: "token reduction is valid ONLY at equal quality — report nDCG/recall ALONGSIDE cost metrics"
+      also_report: "index size (GB, in-memory) and QPS (BEIR omits both)"
+    design_rule: |
+      Score retrieval with classic IR (nDCG@10 primary, join-set Recall@k secondary) via pytrec_eval.
+      Graded 0–3 labels, 50 queries (floor 30), MuSiQue-style multi-hop, blind pooled judging, human-verified.
+      Build a custom entity-centric corpus — no public benchmark has the private-graph + multi-hop + deterministic gold combination Cairn requires.
+      Report quality ALONGSIDE cost at all times. Never claim token-reduction without equal-quality gate.
+    ties_to: "OP-29 (eval measures assembler output quality); OP-30 (agentic grep is one baseline); FF-3 (top-1 vs top-k); FF-2 (relevance not just similarity)"
+
+  - id: OP-32
+    name: "Signal Fusion: RRF Constants and Multi-Signal Combination"
+    question: "How do Cairn's signals (lexical, semantic, graph) combine into a single ranked candidate list — and what constants produce correct results for short agent-retrieval lists?"
+    source: "databases/FALKORDB_GRAPHITI_DEEP_RESEARCH_2026.md §2.6; context/CONTEXT_BEATS_MODEL_SEMANTIC_VS_GREP.md; Cormack & Clarke 2009 (SIGIR); Sverklo benchmark (OP-3)"
+    definition: >
+      Reciprocal Rank Fusion (RRF) merges ranked lists from independent signals into one
+      combined ranking without requiring score normalization. Each signal contributes by
+      rank position, not by raw score magnitude — so BM25 and cosine similarity can be
+      merged even though their score scales are incomparable.
+    formula:
+      standard_rrf: "score(d) = Σ_{signals} 1 / (k + rank_i(d))"
+      graphiti_variant: "score(d) = Σ 1 / (rank_i + 1)   # rank_const=1, not 60"
+      note: "If d does not appear in a signal's ranking, that signal contributes 0 to its score."
+    constant_choice:
+      k_60_standard:
+        origin: "Cormack & Clarke 2009 (SIGIR) — designed for TREC-style lists of 1000+ documents"
+        behavior: "Flattens rank differences: rank-1 vs rank-60 contribute similarly (1/61 vs 1/120). Robust when lists are long and the right answer can appear anywhere."
+        wrong_for_cairn: "Agent retrieval produces short candidate lists (10–50 docs per signal). k=60 collapses the top-k into near-identical scores, losing the signal that rank-1 carries."
+      k_1_agent:
+        origin: "Graphiti (arXiv:2501.13956, Zep production) — empirically chosen for short candidate lists"
+        behavior: "Maximally differentiates by rank: rank-1 contributes 1.0, rank-2 contributes 0.5, rank-3 contributes 0.33. The score curve drops steeply — rank matters."
+        right_for_cairn: "Short lists (10–50 per signal). The top-ranked item from each signal gets the strongest vote."
+      rule: "Use k=1 when per-signal candidate lists are ≤50. Use k=60 only when lists are 100+. Never inherit k=60 from TREC literature without checking list length."
+    candidate_generation:
+      per_signal: "Each signal generates 2×limit candidates before fusion (Graphiti default). Ensures the fused top-k has coverage even if signals partially overlap."
+      dedup: "After fusion, deduplicate by canonical entity ID or doc ID before passing to the assembler."
+    signal_weighting:
+      equal_weights: "Standard RRF assigns equal weight to every signal — rank position is the only differentiator."
+      channelized_rrf:
+        description: "Per-channel weights: score(d) = Σ w_i / (k + rank_i(d)) where Σw_i = 1"
+        evidence: "Channelized RRF outperforms standard RRF (Sverklo benchmark, OP-3 §combination_method)"
+        cairn_recommendation: "Start with equal weights (w=1/N signals); add channelized weights only after eval shows a signal consistently under- or over-contributes."
+    reranker_options:
+      rrf: "Default — fast, no model, deterministic. k=1 for Cairn."
+      mmr: "Diversity-aware (OP-29 formula). Use when assembler's MMR step is skipped or upstream."
+      node_distance: "score = 1/distance_from_pivot_entity. Use when pivoting around a known entity (Primitive B traversal output)."
+      cross_encoder: "Learned scores — best quality, slowest. Hot-path-admissible only if local model. Use as final rerank step before assembler."
+      episode_mentions: "RRF first, then sort by MENTIONS count — surfaces frequently-cited facts. Domain-specific; not default."
+    score_floor:
+      cosine_min_score: 0.6   # Graphiti default — candidates below this threshold are dropped before fusion
+      note: "~ inferred: tune per corpus. 0.6 is a sensible default for normalized embeddings; lower for sparse/specialized domains."
+    pipeline_position:
+      before: "Each signal runs independently and produces its ranked list"
+      fusion: "RRF merges all lists → single ranked candidate list"
+      after: "Dedup by doc ID → cross-encoder rerank (optional) → OP-29 assembler (MMR + budget + order + emit)"
+    design_rule: |
+      Use RRF with k=1 for all agent-retrieval short-list fusion (≤50 candidates per signal).
+      Generate 2×limit candidates per signal before fusion to ensure coverage.
+      Start with equal weights across signals; add channelized weights only after eval (OP-31).
+      Apply a cosine score floor (default 0.6) before fusion to prevent noise amplification.
+      Do NOT inherit k=60 from TREC/academic papers — it was calibrated for 1000-document lists.
+      Fusion is deterministic: same ranked lists → same fused ranking (tie-break by doc_id).
+    ties_to: "OP-3 (hybrid retrieval architecture; channelized RRF reference); OP-29 (assembler consumes fused ranked list); OP-30 (lexical signal feeds RRF); OP-4 (two-stage: retrieve → fuse → rerank); OP-31 (eval measures fusion quality)"
+
+  - id: OP-33
+    name: "Gate Cost Model: When Retrieval Pays Off"
+    question: "How does the adaptive gate decide — deterministically and without a generative LLM — whether retrieval is worth its cost, and if so which signal to use?"
+    source: "context/RETRIEVAL_GATE_COST_MODEL_RESEARCH_2026.md; SRACG (AAAI 2026); Mallen 2023 ACL; CA-RAG arXiv:2606.02581; Adaptive-RAG arXiv:2403.14403; TARG arXiv:2511.09803"
+    definition: >
+      A two-stage LLM-free gate that runs before every retrieve() call. Stage 1 is a
+      deterministic bypass (flags that make the decision trivially). Stage 2 is a scored
+      cost function (complexity × entity-tail × freshness) that returns a RoutingDecision.
+      The gate itself makes zero generative-LLM calls — using one to decide whether to call
+      one is circular.
+    empirical_basis:
+      always_on_retrieval_hurts:
+        source: "SRACG AAAI 2026 (✓)"
+        finding: "Naive always-on retrieval: −2.6 to −3.6pp vs. no retrieval. Selective retrieval: +2.4 to +7.1pp. The skip branch is empirically correct for a large slice of queries."
+        implication: "strategy=none is not a fallback — it is the right answer for 30-40% of agent queries."
+      popularity_boundary:
+        source: "Mallen 2023 ACL (✓)"
+        finding: "Retrieval helps on long-tail entities (+7pp); misleads on head/popular entities (model already knows, retrieval adds noise). The decision boundary is entity popularity, not query complexity alone."
+        signal: "Static popularity lookup: Wikipedia page-view rank proxy, or a pre-built head/tail label for the corpus entity set."
+      utility_formula:
+        source: "CA-RAG arXiv:2606.02581 (✓)"
+        formula: "utility(strategy) = w_Q·quality_prior(strategy) − w_L·latency_cost − w_C·token_cost"
+        weights: "w_Q=0.6, w_L=0.2, w_C=0.2  (empirically tuned; treat as defaults, calibrate per corpus)"
+        quality_priors: "direct_llm=0.52, light=0.64, medium=0.73, heavy=0.82  (bundle quality prior by strategy tier)"
+        token_savings: "26% token reduction at matched quality vs. always-heavy retrieval"
+      complexity_signal:
+        source: "CA-RAG arXiv:2606.02581 (✓)"
+        formula: "c(q) = clip(0.6 · wordlen/20 + 0.4 · cues/3,  0, 1)"
+        cues: "count of relational keywords ('compare', 'why', 'connect', 'between', 'history of', 'what changed')"
+        interpretation: "c < 0.3 → simple (strategy=none or light); c 0.3–0.7 → medium; c > 0.7 → composite/heavy"
+    gate_architecture:
+      stage_1_deterministic_bypass:
+        description: "Flags that shortcut to retrieve=true without scoring"
+        triggers:
+          - "query contains a temporal marker ('today', 'current', 'latest', 'as of') → freshness_required=true → retrieve"
+          - "query contains a version/release marker → retrieve"
+          - "query resolves to a private/personal entity (canonical_id in the user's ontology) → retrieve (model cannot know this)"
+          - "query is multi-entity relational ('connect X and Y', 'path between') → composite"
+        fallthrough: "No flag fires → proceed to Stage 2"
+      stage_2_cost_function:
+        inputs: "query text, resolved entities (from Primitive B tier-1 only — fast), complexity score c(q)"
+        score: "utility = w_Q·quality_prior − w_L·latency_cost − w_C·token_cost"
+        entity_tail_modifier: "if entity is tail/private → boost quality_prior of retrieve tiers by +0.15"
+        output: "RoutingDecision: strategy ∈ {none, grep, semantic, graph, composite}"
+        thresholds:
+          none: "utility(direct_llm) > max(utility(light), utility(medium), utility(heavy))"
+          light: "c(q) < 0.3 AND entity is head/popular AND no temporal flag"
+          composite: "c(q) > 0.7 OR multi-entity relational OR entity is tail AND freshness_required"
+      stage_2_optional_classifier:
+        description: "Adaptive-RAG (arXiv:2403.14403) trains a standalone small classifier (DistilBERT-class) to predict the strategy tier from query features — zero LLM dependency at inference."
+        when_to_use: "When labeled query→strategy pairs are available (from OP-31 eval runs). Drop-in replacement for the cost-function scoring in Stage 2. Not required for the default deterministic path."
+        training_signal: "Gate decisions from OP-31 eval (human-verified query stratification is the training set)."
+    design_rule: |
+      Two-stage gate — deterministic bypass first, cost-function second.
+      Stage 1 catches the easy cases (temporal, private entity, relational) with zero math.
+      Stage 2 uses CA-RAG utility formula: score each strategy tier, pick the highest utility.
+      Default weights: w_Q=0.6, w_L=0.2, w_C=0.2. Calibrate per corpus after OP-31 eval.
+      Entity tail detection is a static lookup — build it at ontology-authoring time (OP-35).
+      The gate makes zero generative-LLM calls. Calling a LLM to decide whether to call a LLM
+      is circular — it costs what you were trying to avoid and adds non-determinism.
+    ties_to: "OP-1 (7-test heuristic gate — Stage 1 is its deterministic implementation); OP-25 (RAG paradigm router — Stage 2 picks the paradigm); OP-31 (eval runs generate the labeled data for optional classifier); OP-35 (ontology authoring produces entity tail lookup)"
+
+  - id: OP-36
+    name: "Connection Suggestion: Cold-Start Link Prediction for a Candidate Node"
+    question: "Given a node that does NOT yet exist in the graph (a table/module about to be created), which existing entities should it connect to — deterministically, with no edges to lean on?"
+    source: "foundations/LINK_PREDICTION_AND_CONNECTION_SUGGESTION_RESEARCH_2026.md; Lü & Zhou survey (arXiv:1010.0725); Rahm & Bernstein VLDB J 10(4) 2001; cold-start link-prediction literature (CSSE 2023, SIGIR 2024)"
+    definition: >
+      Score a NEW candidate node against every existing entity and return the
+      ranked set it should link to, with evidence. A brand-new node has no edges,
+      so every structural index (Common Neighbors / Adamic-Adar / Resource
+      Allocation) is 0 — this is the COLD-START regime. Content/attribute
+      similarity is therefore the primary signal: TF-IDF cosine over the concepts
+      the candidate shares with each existing entity, using corpus IDF. This is
+      the candidate-vs-corpus generalisation of OP-33's link_ranking (node<->node).
+    signals:
+      content_primary:
+        measure: "TF-IDF cosine over shared concepts; IDF from the EXISTING corpus (concept_idf)."
+        why: "Cold-start: no edges → structure unavailable → similar nodes are more likely to link (cold-start link-prediction consensus). Reuses link_ranking primitives."
+        novel_concept_handling: "A concept the candidate has but the corpus lacks (df=0) matches nothing and contributes 0 — honest closed world, no fabricated link."
+      structural_optional:
+        measure: "Adamic-Adar / Resource-Allocation over SEED neighbourhoods, only when the caller supplies seeds (entities the candidate provisionally relates to)."
+        why: "Structural indices are meaningful ONLY once a seed edge exists. RA default (1/deg, no log-zero); AA is the documented alternative."
+        absent_seeds: "structural term is exactly 0 — the API must NOT pretend to structural evidence a cold node cannot have."
+      fusion: "total = content + graph_weight · structural_norm; content-dominant by default. Deterministic tie-break: total desc, target_id asc."
+    do:
+      - "Compute IDF from the existing corpus; build the candidate vector against THAT IDF."
+      - "Return provenance: the shared concept ids (and contributing seeds) that earned each suggestion."
+      - "Drop score-0 suggestions (closed world — never surface a fabricated connection)."
+      - "Keep it in cairn-retrieval; the engine only supplies the graph (honors OP-34 boundary)."
+    never:
+      - "NEVER create the edge or assert a connection 'exists' — Cairn suggests, the caller decides."
+      - "NEVER claim structural evidence for an edgeless candidate (structural=0 without seeds)."
+      - "NEVER add a runtime dep or a generative-LLM call on the default path — MF/GNN/embeddings are opt-in only."
+    related_files:
+      - packages/cairn-retrieval/src/cairn_retrieval/connections.py
+      - packages/cairn-retrieval/src/cairn_retrieval/link_ranking.py
+      - packages/cairn-retrieval/intents/connection_suggestion_intent.yaml
+    ties_to: "OP-33 (link_ranking — same TF-IDF cosine, generalised to a candidate); OP-34 (traverse boundary — ranking stays out of the engine); OP-35 (ontology authoring provides the corpus + concept edges)"
+
+# ============================================================
+# SECTION 3 — CONTESTED / CONTEXT-DEPENDENT FINDINGS
+# ============================================================
+
+contested_findings:
+
+  - id: CF-1
+    claim: "Semantic search consistently beats grep for code retrieval"
+    status: "CONTESTED — tool depends on task type"
+    evidence_for:
+      - "Cursor semsearch A/B test: +12.5% accuracy (Cursor Context Bench)"
+      - "CodeRankEmbed: P@5 = 91.60% vs BM25 6.57%"
+      - "Dense retrieval beats BM25 9–19% on open-domain QA (DPR 2020)"
+    evidence_against:
+      - "Claude Code removed vector index — 'agentic grep won by a lot' (Cursor vs Claude Code natural experiment)"
+      - "BEIR benchmark: BM25 competitive or better out-of-domain — semantic doesn't generalize universally"
+      - "Sverklo benchmark: smart grep (F1=0.67) beats hybrid sverklo (F1=0.58) on reference-finding tasks"
+    resolution: |
+      The answer is task-dependent:
+      - Definition lookup, file dependencies: structural/symbol graph wins
+      - Reference finding, exact identifier: smart grep competitive
+      - Cross-file semantic relationships, concept retrieval: semantic wins
+      - All production systems: hybrid (all three) outperforms any single method
+    design_rule: "Build hybrid. Do not argue semantic vs. grep — both are layers in the final stack."
+
+  - id: CF-2
+    claim: "SWE-bench scores accurately measure coding agent quality"
+    status: "CHALLENGED — contamination likely inflates all scores"
+    source: "arXiv:2512.10218 (University of Waterloo, 2026)"
+    finding: |
+      Claude 3.5/3.7 perform 3–6× better on SWE-bench than on fresh, comparable benchmarks
+      (BeetleBox: 21% vs SWE-bench: 76% — same localization task, intentionally insufficient context).
+      Hard to explain by anything other than training data recall.
+    implication: |
+      Absolute SWE-bench numbers are inflated. Relative differences between retrieval conditions
+      are more trustworthy (contamination affects both with-retrieval and without-retrieval similarly).
+      Real-world task correctness for novel code: 25–34% (arXiv:2510.26130 synthetic vs real-world gap).
+    design_rule: "Do not architect the agent for SWE-bench performance. Architect for novel task correctness."
+
+  - id: CF-3
+    claim: "RAG Fusion improves retrieval quality in production"
+    status: "OFTEN NEUTRAL OR NEGATIVE — gains frequently disappear after rerank + truncation"
+    source: "arXiv:2603.02153"
+    finding: |
+      At scale, recall gains from multiple query variants are typically lost after reranking and
+      context truncation. RAG Fusion adds latency and cost without net quality improvement
+      in pipelines that already use hybrid retrieval + rerank.
+    resolution: "Test ablation before enabling. Do not add on top of an already-complete hybrid+rerank pipeline."
+    design_rule: "If hybrid BM25 + dense + rerank is already in place, RAG Fusion is likely noise. Measure before enabling."
+
+# ============================================================
+# SECTION 4 — WHAT THE RESEARCH DOES NOT SUPPORT
+# ============================================================
+
+research_does_not_support:
+
+  - claim: "Naive always-on RAG improves quality"
+    papers: ["SRACG AAAI 2026"]
+    reality: "Standard RACG (always retrieve) underperforms no-retrieval by 2.58–3.61pp on multiple LLMs. Only necessity-aware selective retrieval beats the no-retrieval baseline."
+
+  - claim: "Retrieving top-5 or top-10 is safer than top-1"
+    papers: ["arXiv:2511.05302", "SRACG AAAI 2026"]
+    reality: "Top-1 frequently outperforms top-3 and top-5 on narrow, focused tasks. Adding more retrieved examples introduces noise and contradictory context."
+
+  - claim: "Large data volume creates a retrieval moat"
+    papers: ["CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026.md Part 20", "Shumailov Nature 2024"]
+    reality: "Volume is replicable. Proprietary outcome-labeled data from closed-loop operation is the durable edge. A large unannotated corpus is not a moat."
+
+  - claim: "Semantic retrieval quality degrades in proportion to codebase size"
+    papers: ["Cursor semsearch blog", "CodeRAG-Bench NAACL 2025"]
+    reality: "The opposite — retrieval gains INCREASE with codebase size. Cursor shows +2.6% code retention on large codebases; CodeRAG-Bench shows largest gains on repository-level tasks. Semantic retrieval earns its cost at scale."
+
+  - claim: "Synthetic data can replace ground-truth labels for corpus growth"
+    papers: ["Shumailov Nature 2024 (arXiv:2305.17493)"]
+    reality: "Recursive synthetic data causes model collapse. Ground-truth labels must come from real-world outcomes, not from the model's own outputs."
+
+  - claim: "Static NIAH (Needle-in-a-Haystack) scores predict agentic context robustness"
+    papers: ["HaystackCraft arXiv:2510.07414"]
+    reality: |
+      GPT-5 mini matches GPT-5 on single-pass NIAH but collapses under enforced multi-round reasoning.
+      More retrieval rounds can hurt more than longer single-pass context.
+      Static NIAH is necessary but not sufficient — benchmark multi-round agent workflows separately.
+
+  - claim: "LLM self-correction reliably detects and stops cascading hallucinations"
+    papers: ["CHARM arXiv:2606.04435"]
+    reality: |
+      LLM self-correction cascade detection rate: 12.8% (near-useless).
+      CHARM framework achieves 89.4% by treating it as a structural detection problem, not a self-reflection one.
+      Do not architect error recovery around model self-review — use external checkpoint verifiers.
+
+  - claim: "Passive summarization on threshold is sufficient for long-horizon agent context management"
+    papers: ["ARC ACL Findings 2026; AdaCoM arXiv:2605.30785"]
+    reality: |
+      Passive summarization preserves early errors and cannot purge mid-history mistakes.
+      ARC (reflection-driven context manager) beats passive summarize by +11% absolute on BrowseComp-ZH.
+      Active rule-based ops (hide/restore/purge) are needed before compaction milestone.
+
+  - claim: "RAG and fine-tuning are equivalent strategies for factual accuracy in bounded domains"
+    papers: ["arXiv:2502.10497 (Baqar & Khanda 2025, 20K FAQ queries)", "arXiv:2505.10792 (Finetune-RAG 2025)"]
+    reality: |
+      Fine-tuning outperforms RAG when the domain is bounded and labeled data exists:
+        DoRA: 90.1% accuracy | LoRA: 85.5% | RAG: 81.2% (20K FAQ, 400K-entry knowledge base)
+      Finetune-RAG (fine-tuning specifically to resist hallucination in RAG scenarios) adds
+      +21.2% factual accuracy over the base model — treating retrieved context critically, not naively.
+      Design rule: RAG = open/evolving/unbounded domains (new facts arrive continuously);
+      fine-tune (LoRA/DoRA) = closed, well-defined, stable domains where a labeled corpus exists.
+      Agent design rule: use RAG for the semantic corpus (external knowledge, evolving) + LoRA-style fine-tuning
+      for task-specific accuracy gains when the task domain is stable (e.g., stock analysis patterns).
+
+  - claim: "Always-on retrieval universally outperforms relying on parametric knowledge"
+    papers: ["Mallen et al. ACL 2023 (arXiv:2212.10511)", "SRACG AAAI 2026"]
+    reality: |
+      For high-popularity / well-known facts, LMs are competitive unassisted — and retrieval can
+      actively mislead (injects noise alongside the known answer). Mallen 2023 (ACL): adaptive
+      retrieval (only when needed) outperforms both always-on retrieval and always-off for popular
+      entities. Always-on retrieval is the baseline that SRACG beats by +7pp — not the ceiling.
+      Retrieve selectively, by demonstrated need (novelty, specificity, freshness), not reflexively.
+
+  - claim: "Global memory rewrites are the default update strategy for agent memory stores"
+    papers: ["arXiv:2606.24775 (agent-native memory research)"]
+    reality: >
+      Global memory rewrite creates throughput bottlenecks in production — every update
+      triggers a full rewrite of the memory store regardless of change scope.
+      Preferred architecture: local/targeted updates (update only the affected memory entries).
+      Design rule: apply the incremental update principle (OP-26) to memory stores, not just
+      retrieval indices.
+
+  - claim: "LLMs handle pragmatic inference uniformly across all construction types"
+    papers: ["Goodman & Frank 2016 (RSA framework)"]
+    reality: >
+      LLMs perform pragmatic inference adequately in general but fail specifically on negation
+      and highly context-dependent constructions. The failure is not a general pragmatics gap
+      but a specific failure class — architect around it by keeping negation-heavy constraints
+      in structured fields, not embedded in natural-language context.
+    source: "context/CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026.md §10.1"
+
+  - claim: "Tool poisoning via MCP is a prompt-layer problem solvable with better instructions"
+    papers: ["arXiv:2603.22489; CVE-2025-54136"]
+    reality: |
+      Tool poisoning exploits the structural client-server trust gap — 57 threats identified across host/client/LLM/server.
+      34% are tampering + information disclosure. Malicious tool metadata (CVE-2025-54136) is injected before the prompt.
+      Mitigation requires schema pinning, gateway inspection, allowlisted servers — not prompt rules alone.
+
+# ============================================================
+# SECTION 5 — QUANTITATIVE REFERENCE TABLE
+# ============================================================
+
+quantitative_reference:
+  description: "Confirmed gains and harms from 2025–2026 literature"
+
+  retrieval_gains:
+    - study: "CodeRAG-Bench NAACL 2025"
+      condition: "GPT-4o + gold (oracle) documents on SWE-bench"
+      gain: "+27.4% correctness"
+    - study: "arXiv:2503.20589"
+      condition: "In-context API-relevant retrieval (AllianceCoder)"
+      gain: "+20% Pass@1"
+    - study: "Cursor semsearch blog"
+      condition: "Semantic search vs grep, Cursor Context Bench"
+      gain: "+12.5% average accuracy; +23.5% Composer tasks; +2.6% large codebase retention"
+    - study: "SRACG AAAI 2026"
+      condition: "Selective RAG vs no retrieval (GPT-3.5, HumanEval+)"
+      gain: "+7.06pp Pass@1"
+    - study: "ARCS arXiv:2504.20434"
+      condition: "Retrieval + execute-repair loop (Llama-3.1-405B)"
+      gain: "87.2% vs 82.3% CodeAgent baseline"
+    - study: "RepoScope arXiv:2507.14791"
+      condition: "Structural + semantic vs semantic-only retrieval"
+      gain: "+36.35% relative Pass@1"
+    - study: "Lumen ory/lumen (9 real bug-fix tasks)"
+      condition: "Semantic index vs no index"
+      gain: "−53% session time, −66% output tokens, −39% cost; quality maintained"
+    - study: "Oracle-SWE arXiv:2604.07789"
+      condition: "GPT-4o + all oracle signals (SWE-bench Verified)"
+      gain: "97% vs 23% base"
+    - study: "Copilot embedding model upgrade (MRL + InfoNCE + hard negatives, Sept 2025)"
+      condition: "New model vs previous Copilot model on internal retrieval benchmark"
+      gain: "+37.6% retrieval quality; 8× smaller index; 2× throughput; +110.7% C# / +113.1% Java code acceptance"
+    - study: "Claude Code vs Cursor token profile (Zapier/AIDesigner 2026)"
+      condition: "Identical coding tasks; Claude Code targeted file reads vs Cursor broad context injection"
+      gain: "Claude Code: ~33K tokens; Cursor: ~188K tokens — 5.5× fewer tokens with equivalent task quality"
+
+  retrieval_harms:
+    - study: "arXiv:2503.20589"
+      condition: "Similar-domain code retrieval (not task-needed)"
+      harm: "−5% to −15% Pass@1"
+    - study: "SRACG AAAI 2026"
+      condition: "Standard RACG (naive always-on retrieval)"
+      harm: "−2.58% to −3.61% vs no-retrieval baseline"
+    - study: "arXiv:2511.05302"
+      condition: "Top-3 and top-5 vs top-1 on code review generation"
+      harm: "CRer top-1: 12.32 BLEU-4 → top-3: 11.76 → top-5: 10.81"
+    - study: "Chroma 2025 context rot (18 frontier models)"
+      condition: "Increasing context length (all models)"
+      harm: "All 18 models degrade; acceleration with semantic distractors; no exceptions"
+    - study: "Stanford TACL 2024 Lost-in-the-Middle"
+      condition: "Relevant document in middle of 20-document context"
+      harm: "GPT-3.5-Turbo drops below closed-book baseline (56.1%)"
+
+# ============================================================
+# CHANGELOG
+# ============================================================
+
+changelog:
+  - version: "1.9"
+    date: "2026-07-14"
+    source_added: "foundations/LINK_PREDICTION_AND_CONNECTION_SUGGESTION_RESEARCH_2026.md"
+    changes:
+      - "OP-36 (new): Connection Suggestion — cold-start link prediction for a candidate node. Content (TF-IDF cosine over shared concepts, corpus IDF) primary; Adamic-Adar/Resource-Allocation structural signal optional (seeds only). Generalises OP-33 link_ranking node<->node to candidate-vs-corpus. Provenance + closed-world drop-on-zero; ranking stays out of the engine (OP-34)."
+  - version: "1.8"
+    date: "2026-06-27"
+    change: "Extracted the ENTITY subsystem into patterns_entities.yaml. Removed OP-28, OP-34, OP-35 from this file (moved verbatim, now co-located with theory TH-1..TH-5). This file remains the general retrieval-knowledge corpus; entities are a separate subsystem file."
+  - version: "1.7"
+    date: "2026-06-27"
+    source_added: "context/RETRIEVAL_GATE_COST_MODEL_RESEARCH_2026.md; context/ENTITY_GRAPH_TRAVERSAL_RESEARCH_2026.md; context/ONTOLOGY_AUTHORING_RESEARCH_2026.md"
+    changes:
+      - "OP-32 (new): Signal Fusion — RRF k=1 for short lists (not k=60 TREC), channelized RRF, cosine score floor=0.6, 2×limit candidate generation, reranker options table"
+      - "OP-33 (new): Gate Cost Model — two-stage LLM-free gate: Stage 1 deterministic bypass (temporal/private/relational flags), Stage 2 CA-RAG utility formula (w_Q=0.6, w_L=0.2, w_C=0.2), complexity signal c(q), entity tail modifier, optional Adaptive-RAG classifier"
+      - "OP-34 (new): Entity Graph Traversal — BFS depth=2 default, hop-distance discount, bi-temporal filter, flat-store fallback (inverted index), community detection routing, GraphAdapter Protocol"
+      - "OP-35 (new): Ontology Authoring — minimal schema (type::label canonical_id + aliases + entity_type + valid_from + source), three construction strategies (manual/GLiNER/LLM-batch), three-tier build-time dedup (exact→MinHash/LSH→LLM-offline), incremental maintenance, conflict resolution, AliasTableAdapter Protocol"
+  - version: "1.5"
+    date: "2026-06-27"
+    source_added: "context/CONTEXT_ASSEMBLY_AND_PACKING_RESEARCH_2026.md; context/LEXICAL_RETRIEVAL_SIGNAL_RESEARCH_2026.md; context/AGENT_RETRIEVAL_EVALUATION_RESEARCH_2026.md"
+    changes:
+      - "FF-11 (new): Context length alone degrades 13.9–85% even with perfect retrieval (Du 2025 EMNLP Findings arXiv:2510.05381) — primary basis for minimal-context invariant"
+      - "OP-29 (new): Context Assembler — deterministic 5-step pipeline (budget → MMR(λ) → dedup(cos≥0.95) → edge-load order → emit+trace). MMR formula with λ presets (0.5/0.7/0.3), greedy packing tie-break, trace manifest spec. Covers LLMLingua-2 hot-path boundary decision."
+      - "OP-30 (new): Lexical Signal Adapter — two-mode (ScanAdapter=ripgrep default, IndexAdapter=FTS5 default/Tantivy/bm25s). Scan-vs-index decision rule. Rejects Whoosh and DuckDB FTS for default role. Feeds RRF fusion alongside semantic+graph."
+      - "OP-31 (new): Retrieval Evaluation Harness — nDCG@10 primary, join-set Recall@k secondary, pytrec_eval, 50-query MuSiQue-style corpus design (graded 0–3, pooled, blind-judged, human-verified). Custom entity-centric corpus required. p50/p95/p99 protocol. Quality-alongside-cost gate."
+  - version: "1.4"
+    date: "2026-06-25"
+    source_added: "cross-check audit (tools/ENTITY_RELATIONSHIP_RESOLUTION_RESEARCH_2026.md)"
+    changes:
+      - "OP-28 entity_resolution_cascade: added problem_class_split (detection != linking != dedup != relation extraction; build-time extraction/embedding vs query-time resolution) + known_failure_reversal (reversal curse, store both directions / mirror-edge schema constraint)"
+  - version: "1.3"
+    date: "2026-06-25"
+    source_added: "databases/FALKORDB_GRAPHITI_DEEP_RESEARCH_2026.md; databases/GRAPH_DATABASES_AND_ENTITY_LIBRARIES_2026.md"
+    changes:
+      - "OP-28: added bi_temporal_model — valid-time (valid_at/invalid_at, when true) vs ingestion-time (created_at/expired_at, when known) as two independent axes; enables point-in-time-knowledge + fact-validity + out-of-order ingestion; single timestamp conflates 'true then' with 'known then' (Graphiti arXiv:2501.13956)"
+      - "OP-28: added graph_vs_registry.backend_selection — algebraic/GraphBLAS backends (FalkorDB p99 ~136ms vs Neo4j ~46,924ms) for multi-hop under interactive latency; graph DB is over-engineering for single-hop CRUD"
+  - version: "1.2"
+    date: "2026-06-25"
+    source_added: "tools/WORLD_MODEL_TOOL_ROUTING_RESEARCH_2026.md; tools/ENTITY_RELATIONSHIP_RESOLUTION_RESEARCH_2026.md"
+    changes:
+      - "OP-28 (new): World Model — Entity-Grounded Tool Routing. WM grounds tool args before/after execution; sits BEFORE Tool RAG (grounding Layer B precedes selection Layer A). Visibility-grounding: args ⊆ visibility_set or same-turn search/link results (Graph Explorer ACL 2026 +22.5 Hit@1). Entity-resolution cascade (exact→fuzzy→semantic→LLM arbiter; entropy gate; LLM-as-augmenter LLMaEL +8.9%). Graph-vs-registry routing (RAGSearch — no universal winner). Cross-system entity index (silo namespace fix). Temporal version-sensitivity (VersionRAG 58→90%)."
+  - version: "1.1"
+    date: "2026-06-25"
+    source_added: "tools/WORLD_MODEL_TOOL_ROUTING_RESEARCH_2026.md (tools spine review)"
+    changes:
+      - "OP-18: added advanced_selection_methods — regime table (small/medium/large registry → shortlist K); CMTF (arXiv:2606.06284, causal precondition filter ~100→1/step, ~90% token cut); BoR adaptive K (arXiv:2605.24660); ToolScope (ACL 2026, merge redundant +8–39%); ToolOmni (ACL 2026, proactive retrieval in loop)"
+      - "OP-18: pipeline enriched with merge + causal-filter steps; reported_gains added Llama 3.1 8B (fails@46, succeeds@19)"
+      - "OP-18: added selection_eval — BFCL V4 format sensitivity (same tool, different schema shape → fail); V4 scoring weights; minimum_viable_eval checklist (routing/selection/fresh-vs-ref/schema-robustness/chain/spill); execution-derived oracle rule"
+      - "OP-18: added description_quality (cookbook review) — ~80% of invocation reliability is description quality; name={verb}_{object}_{scope}; first sentence=trigger, second=negative boundary; 'Route here for/NOT for'; agent generic-description weakness"
+  - version: "1.0"
+    date: "2026-06-25"
+    source_added: "context/CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026.md (gap review)"
+    changes:
+      - "OP-16 HyDE: added amplification_failure_mode — wrong-hypothesis causes retrieval amplification loop, not just specificity error (CONTEXT_BUILDING Part 14)"
+      - "OP-22: added cross_turn_context_clash ~39% performance drop (Microsoft/Salesforce 2025); detect before injection, not after"
+      - "OP-24: added production_comprehension_asymmetry — production=shorter timescale context; comprehension=longer; design: never compress current user message (Yamashita 2025)"
+      - "OP-27 (new): Compression-Only Memory Architectures — R3Mem (arXiv:2502.15957, lossless reversible), CCM (conditional LoRA KV, 5× lower memory), COMEDY (no retrieval DB, beats retrieval-based memory on long-term conversations)"
+      - "research_does_not_support: global memory rewrites (arXiv:2606.24775) — local/targeted updates preferred; throughput bottleneck"
+      - "research_does_not_support: LLM pragmatic inference fails specifically on negation/context-dependent constructions (Goodman & Frank 2016 RSA)"
+  - version: "0.9"
+    date: "2026-06-25"
+    source_added: "RAG_SEMANTIC_INDEXING_OUTPUT_QUALITY_RESEARCH_2025_2026.md"
+    changes:
+      - "research_does_not_support: RAG = fine-tuning for bounded domains — DoRA 90.1% > LoRA 85.5% > RAG 81.2% (arXiv:2502.10497); Finetune-RAG +21.2% factual accuracy; design rule: RAG for open domains, fine-tune for stable bounded domains"
+  - version: "0.8"
+    date: "2026-06-25"
+    source_added: "SEMANTIC_INDEXING_CURSOR_VS_COPILOT_DEEP_DIVE_2026.md"
+    changes:
+      - "OP-18 enriched: MCP lazy-loading finding — 46.9% token reduction (Cursor A/B test); mechanism: names+descriptions static, full schemas on-demand"
+      - "OP-26: Incremental Corpus Maintenance — content-hash keyed embedding cache + Merkle-style change detection O(k log n) + cross-instance index reuse (Cursor: 4h → 21s 99th pct)"
+      - "Quantitative table: Copilot embedding upgrade (+37.6% quality, 8× smaller, 2× throughput); Claude Code token profile (5.5× fewer tokens: 33K vs 188K)"
+  - version: "0.7"
+    date: "2026-06-25"
+    source_added: "WHEN_TO_RELY_ON_LLM_ALONE.md + CONTEXT_BEATS_MODEL_SEMANTIC_VS_GREP.md (10 verified papers)"
+    changes:
+      - "FF-10: Parametric knowledge structural failure modes — extraction failure (Allen-Zhu 3.1 ~0% QA), direction failure (Berglund reversal curse), capacity ceiling (~2 bits/param); hallucination inevitability theorem (Xu 2024)"
+      - "research_does_not_support: always-on retrieval universally outperforms parametric (Mallen 2023 ACL — retrieval misleads on popular facts; adaptive beats always-on)"
+  - version: "0.6"
+    date: "2026-06-25"
+    source_added: "RAG_ROUTING_AND_PARADIGM_SELECTION_2026.md"
+    changes:
+      - "OP-25: RAG Paradigm Router — 5 paradigms, routing decision tree, CA-RAG cost function (utility = quality − α·latency − β·tokens; 26% fewer tokens), corpus structure features (hubness/dispersion/connectivity), RAG-before-LLM ordering rule, RAG×model interaction table"
+  - version: "0.5"
+    date: "2026-06-25"
+    source_added: "context/CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026.md (Parts 1, 3, 11)"
+    changes:
+      - "FF-9: Multi-session accuracy degradation — LongMemEval 30% drop; RMM +10%; SynapticRAG"
+      - "OP-24: Context compression priority tiers (high-retain/medium-gist/low-discard) + 5 retrieval cue types; context reinstatement principle"
+  - version: "0.4"
+    date: "2026-06-25"
+    source_added: "context/CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026.md (data quality framework)"
+    changes:
+      - "OP-10 enriched: added data_quality_framework block (Wang & Strong 1996 — accuracy, completeness, currency, relevance)"
+  - version: "0.3"
+    date: "2026-06-25"
+    source_added: "CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026.md (v1.5 FINAL, 43 parts)"
+    changes:
+      - "FF-6: Four context failure modes taxonomy (Breunig + agentic extensions)"
+      - "FF-7: Cascading corruption — CHARM 89.4% vs 12.8% self-correction; HaystackCraft multi-round"
+      - "FF-8: Accuracy/latency/cost tradeoff map (Mem0 LOCOMO numbers)"
+      - "OP-13: Write/Select/Compress/Isolate — 4 operators with technique lists"
+      - "OP-14: Intent-driven context profiles — 5 templates (A-E)"
+      - "OP-15: Token budget allocation + prompt caching (static/dynamic split)"
+      - "OP-16: Query transformation routing (symptom→technique map)"
+      - "OP-17: Trust boundary levels T0–T4 + 5 attack vectors"
+      - "OP-18: Tool RAG — dynamic selection pipeline; reported gains"
+      - "OP-19: Negative selection — 9 explicit exclude categories"
+      - "OP-20: Active context management — ARC, AdaCoM, Sculptor; fidelity-reliability tradeoff"
+      - "OP-21: Embedding drift monitoring — 3 sources, 4 signals, prevention discipline"
+      - "OP-22: Temporal RAG + conflict resolution — ConflictRAG 88.7% F1; VersionRAG 58%→90%"
+      - "OP-23: Context observability — 8 trace fields; debug workflow"
+      - "CF-3: RAG Fusion — often neutral/negative at scale (arXiv:2603.02153)"
+      - "OP-9 enriched: agentic extensions (cascade/thrash/storm/self-distraction) + failure mode classification"
+      - "research_does_not_support: +4 items (static NIAH, self-correction cascades, passive summarization, tool poisoning)"
+  - version: "0.2"
+    date: "2026-06-24"
+    changes:
+      - "FF-4 cumulative table: +33pp → +33–45pp (Reproduction Test), +10pp → +10–27pp (Edit Location) — aligned with range reported in arXiv:2604.07789"
+  - version: "0.1"
+    date: "2026-06-22"
+    changes:
+      - "Initial extraction from all 7 sources"
+      - "5 foundational findings (FF-1 through FF-5)"
+      - "11 operational patterns (OP-1 through OP-11)"
+      - "2 contested findings (CF-1, CF-2)"
+      - "5 items research does not support"
+      - "Full quantitative reference table"
+    sources_processed:
+      - "WHEN_TO_RELY_ON_LLM_ALONE.md ✓"
+      - "context/CONTEXT_BEATS_MODEL_SEMANTIC_VS_GREP.md ✓"
+      - "EMBEDDING_SIMILARITY_THRESHOLDS_RESEARCH_2026.md ✓"
+      - "EMBEDDING_CORPUS_GROWTH_AND_PRECISION.md ✓"
+      - "CONTEXT_BUILDING_AND_MAINTENANCE_RESEARCH_2026.md Part 20 ✓"
+      - "OPENAI_EMBEDDINGS_COMPREHENSIVE_RESEARCH_2026.md ✓"
+      - "RAG_SEMANTIC_INDEXING_OUTPUT_QUALITY_RESEARCH_2025_2026.md ✓"

@@ -1,0 +1,85 @@
+# Retrieval Ranking — Feedback Ledger
+#
+# Rounds of decisions/corrections for cairn-retrieval RANKING capabilities
+# (link_ranking, connection suggestion, and future relevance work). Newest
+# rounds appended at the end. A round records: context, root_cause, fix,
+# validation, outcome — so later work does not relitigate settled boundaries.
+#
+# Scope: ranking/relevance ONLY. Engine boundaries (resolve/traverse/authoring)
+# have their own patterns; ranking must never leak INTO the engine (OP-34).
+
+meta:
+  component: cairn-retrieval
+  topic: ranking_and_relevance
+  patterns: docs/patterns/patterns_retrieval_knowledge.yaml
+  research: docs/research/foundations/LINK_PREDICTION_AND_CONNECTION_SUGGESTION_RESEARCH_2026.md
+
+rounds:
+  - round: 1
+    date: "2026-07-11"
+    capability: link_ranking (M3.0)
+    context: >
+      First ranking capability: recommend internal document<->document links.
+      Needed a relevance measure that is deterministic, zero-dep, zero-LLM and
+      does not make a ubiquitous concept link everything to everything.
+    root_cause: >
+      Naive shared-concept counting links every pair that shares any concept; a
+      concept present in all documents is uninformative yet dominates.
+    fix: >
+      TF-IDF cosine over shared concepts. IDF(c)=log(N/df(c)) → a concept in all
+      N documents has IDF 0 and is DROPPED. TF = doc->concept edge weight.
+      score = cosine in [0,1]. Deterministic tie-break: score desc, target_id asc.
+    boundary_decisions:  # load-bearing rules later ranking work MUST honor
+      - "Ranking lives in cairn-retrieval, NEVER in the engine. traverse() does"
+      - "  only structural bounded closure (OP-34); it must not score/rank."
+      - "IDF-0 concepts contribute nothing and are dropped — no ubiquity linking."
+      - "Deterministic + byte-stable: sorted iteration, rounded scores, id tie-break."
+      - "Closed world: score 0 links are dropped, never surfaced as a recommendation."
+      - "Provenance: every recommendation carries the shared concept ids that earned it."
+    validation: "Unit tests over synthetic concept graphs; byte-stable output."
+    outcome: SHIPPED
+    files:
+      - packages/cairn-retrieval/src/cairn_retrieval/link_ranking.py
+      - packages/cairn-retrieval/intents/link_ranking_intent.yaml
+
+  - round: 2
+    date: "2026-07-14"
+    capability: connection_suggestion (OP-36)
+    context: >
+      Schema-graph gap: an agent asked to design a NEW table (e.g. `news`) has no
+      map of the existing 148-table schema, so it designs in isolation and misses
+      the connections it should share. Needed: rank which existing entities a
+      not-yet-existing candidate should link to — deterministically.
+    prior_rounds_scanned: >
+      Round 1 (link_ranking). Reused its settled boundaries rather than
+      relitigating: ranking stays out of the engine, IDF-0 concepts drop,
+      deterministic + closed-world (drop score-0), provenance on every result.
+    root_cause: >
+      A brand-new node has NO edges, so every structural link-prediction index
+      (CN/Adamic-Adar/Resource-Allocation) is 0 — structural cannot be the signal
+      for a node that does not yet exist. This is the cold-start regime.
+    fix: >
+      Content-first: TF-IDF cosine of the candidate's concept vector against each
+      existing entity, using corpus IDF (reused concept_idf). Optional
+      Resource-Allocation structural term (1/deg over seeds ∩ Γ(y)) that fires ONLY
+      when the caller supplies seeds — absent seeds it is exactly 0, never faked.
+      Fused content-dominant (graph_weight=0.25). Candidate-vs-corpus generalisation
+      of round 1's node<->node rank_links.
+    boundary_decisions:
+      - "Structural indices are 0 for an edgeless candidate — content must lead; the"
+      - "  API must not manufacture structural evidence a cold node cannot have."
+      - "Novel concept (absent from corpus) matches nothing → contributes 0 (closed world)."
+      - "Cairn SUGGESTS with evidence; it never creates the edge or asserts one exists."
+      - "MF/GNN/embeddings are opt-in accelerators, never the zero-dep default path."
+    validation: >
+      6 constraint tests (content ranking, structural seeds-only, provenance +
+      empty-on-no-overlap, determinism/closed-world, joint) — all pass; full suite
+      120 passed; mypy clean. Runnable example examples/schema_connection_suggestion.py
+      correctly maps a `news` table to `article`>`comment`, drops the ubiquitous
+      `id` column (IDF 0), and boosts via an author seed.
+    outcome: SHIPPED
+    files:
+      - packages/cairn-retrieval/src/cairn_retrieval/connections.py
+      - packages/cairn-retrieval/intents/connection_suggestion_intent.yaml
+      - packages/cairn-retrieval/tests/unit/test_connections.py
+      - examples/schema_connection_suggestion.py

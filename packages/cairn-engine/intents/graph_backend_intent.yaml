@@ -1,0 +1,173 @@
+# ==============================================================================
+# Cairn — Module Intent: graph-backend adapter / openCypher compiler (M2.3)
+# ==============================================================================
+# License: MIT · Copyright (c) 2026 Leo Celis · https://ivdframework.dev
+# Parent: ../../../cairn_system_intent.yaml (v0.2.1)
+# Patterns: patterns_entities.yaml — OP-34 (bounded traversal), TH-4 (bounded
+#           closure), TH-3 (bitemporal filter), OP-35 (schema)
+# Principle: interface.design_principle_no_query_language
+# Resolves: OQ-3 (traversal intent -> backend query language) FOR openCypher
+# ==============================================================================
+
+scope:
+  level: "module"
+  type: "feature"
+  granularity: "fine"
+
+metadata:
+  feature_id: "cairn_graph_backend"
+  category: "agent_infrastructure"
+  tags: ["graph-backend", "opencypher", "neo4j", "falkordb", "no-query-language", "deterministic"]
+  status: "in_progress"
+  introduced_version: "0.2.0"
+
+intent:
+  summary: >
+    Compile the SAME bounded-traversal intent that the in-memory BFS runs into a
+    single deterministic openCypher query, and execute it against an external
+    graph DB (Neo4j / FalkorDB / Neptune openCypher) through a CALLER-SUPPLIED
+    driver callable. Cairn decides WHAT to traverse; the backend executes HOW.
+    The agent never writes Cypher (design_principle_no_query_language); cairn
+    never imports a DB driver (storage_agnostic_core stays zero-dep).
+  goal: |
+    M2.2 proved a second STORAGE backend (SQLite) for the alias table. M2.3
+    proves a second EXECUTION backend for traversal: instead of the core walking
+    edges one hop at a time in Python, it emits one openCypher query that the
+    graph DB runs, and maps the rows back to the same TraversalResult the
+    in-memory traverse() produces. Identical bounded-closure semantics, moved
+    into the backend's language — this is exactly what OQ-3 asks for.
+
+    Deliverables:
+      1. compile_traversal(canonical_id, *, depth, as_of, known_as_of)
+         -> CypherQuery(text, params): a PURE function, byte-stable, zero-dep.
+         Variable-length bounded path from the seed; both-axis bitemporal edge
+         filter (half-open, None = open, only emitted for the axes supplied);
+         shortest-hop per node; refs joined via OPTIONAL MATCH.
+      2. traverse_cypher(canonical_id, *, run, depth, as_of, known_as_of)
+         -> TraversalResult: runs the compiled query via `run` (the driver
+         boundary: run(text, params) -> rows) and maps rows -> TraversalHit,
+         sorted (hop, entity_id, doc_id) so output is identical to in-memory.
+    Graph schema mapping is documented and fixed: (:Entity {id})-[edge {predicate,
+    valid_from, valid_until, known_from, known_until, weight}]->(:Entity);
+    (:Entity)-[:HAS_REF]->(:Ref {doc_id, locator}).
+  success_metric: "compile_traversal is byte-stable; traverse_cypher over a fake driver returns a TraversalResult identical to in-memory traverse on the same graph; cairn core imports no DB driver. All under python 3.11, stdlib-only."
+  stakeholders:
+    - "cairn users with an existing graph DB (don't want to duplicate their graph into cairn's map)"
+    - "OQ-3 (per-backend traversal compilation)"
+
+design_decisions:
+  callable_driver_boundary:
+    decision: "The DB driver enters as a caller-supplied callable `run(query, params) -> rows` (same boundary as EmbedderFn / ArbiterFn). cairn NEVER imports neo4j / falkordb / any driver."
+    rationale: "storage_agnostic_core is SACRED — the core must import no DB client (charter req + test_core_imports_no_db_client). A real neo4j adapter would be the core's first hard dep. The callable keeps the core pure and makes the compiler fully testable with a fake run()."
+  depth_is_literal:
+    decision: "depth is validated 0..3 and INLINED as an integer literal in the query text (openCypher forbids parametrized variable-length bounds `*1..$d`). seed and as_of/known_as_of are proper $params (injection-safe)."
+    rationale: "depth is a small int cairn controls; inlining is safe and keeps the query a single deterministic string. User-supplied strings are always parameters, never interpolated."
+  bitemporal_axes_conditional:
+    decision: "A WHERE filter is emitted for an axis ONLY when its instant is supplied; both None -> no WHERE at all. Same None-as-open half-open rule as _within (OQ-4)."
+    rationale: "Deterministic minimal query; mirrors as_at/traverse semantics exactly so the backend path and the in-memory path agree."
+
+interface:
+  type: "library"
+  tools:
+    - name: "compile_traversal"
+      description: "compile_traversal(canonical_id, *, depth=2, as_of=None, known_as_of=None) -> CypherQuery. Pure; same args -> byte-identical text+params."
+      parameters:
+        - name: "canonical_id"
+          type: "string"
+          required: true
+          description: "Seed entity id (bound as $seed — injection-safe)"
+        - name: "depth"
+          type: "integer"
+          required: false
+          description: "Hop bound; 0..3; inlined as a literal; outside range raises ValueError"
+        - name: "as_of"
+          type: "string"
+          required: false
+          description: "ISO 8601 valid-time instant; None omits the valid-time filter"
+        - name: "known_as_of"
+          type: "string"
+          required: false
+          description: "ISO 8601 transaction-time instant; None omits the transaction-time filter"
+      returns: "CypherQuery(text: str, params: dict[str, str])"
+      test: "packages/cairn-engine/tests/unit/test_cypher.py::test_compile_golden"
+    - name: "traverse_cypher"
+      description: "traverse_cypher(canonical_id, *, run, depth=2, as_of=None, known_as_of=None) -> TraversalResult. Executes the compiled query via the caller's `run` callable and maps rows to hops/scores identically to in-memory traverse."
+      parameters:
+        - name: "run"
+          type: "callable"
+          required: true
+          description: "run(query_text, params) -> iterable of row mappings with keys entity_id, hop, doc_id, locator. The caller's DB driver boundary."
+      returns: "TraversalResult (hits sorted by hop, entity_id, doc_id; traversal_mode='graph')"
+      test: "packages/cairn-engine/tests/unit/test_cypher.py::test_traverse_cypher_matches_in_memory"
+
+# ------------------------------------------------------------------------------
+# Constraints — critical LAST (position bias). 1:1 to named tests.
+# 5 constraints -> joint_satisfaction required.
+# ------------------------------------------------------------------------------
+constraints:
+  - id: "C-CYPHER-1"
+    statement: "compile_traversal with no temporal filter emits a bounded variable-length path from $seed to depth (inlined literal), returns entity_id + shortest hop + optional ref (doc_id, locator), ORDER BY hop, entity_id, doc_id. params == {'seed': canonical_id}. Same args -> byte-identical text."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-engine/tests/unit/test_cypher.py::test_compile_golden"
+    test_provenance: "human_authored"
+    execution_oracle:
+      type: "golden_fixture"
+      note: "Exact expected query string hand-written and asserted char-for-char."
+
+  - id: "C-CYPHER-2"
+    statement: "Bitemporal filters are conditional and per-axis: as_of adds a half-open valid-time predicate over all edges in the path and binds $as_of; known_as_of adds the transaction-time predicate and binds $known_as_of; both omitted -> no WHERE clause. None = open end (OQ-4). Matches _within / as_at semantics."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-engine/tests/unit/test_cypher.py::test_compile_bitemporal_axes"
+    test_provenance: "human_authored"
+
+  - id: "C-CYPHER-3"
+    statement: "depth is validated 0..3 (ValueError outside, same bound as traverse) and inlined as an integer literal; user strings (seed, as_of, known_as_of) are ALWAYS $params, never string-interpolated into the query text (injection-safe)."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-engine/tests/unit/test_cypher.py::test_depth_bound_and_no_injection"
+    test_provenance: "human_authored"
+
+  - id: "C-CYPHER-4"
+    statement: "traverse_cypher over a fake run() returns a TraversalResult whose hits (ref, entity_id, hop, score=1/(1+hop)) EQUAL those of the in-memory traverse() on the same graph — same order, same scores. Rows with a null doc_id (ref-less node) contribute no hit; traversal_mode == 'graph'."
+    assumption_status: "KNOWN"
+    test: "packages/cairn-engine/tests/unit/test_cypher.py::test_traverse_cypher_matches_in_memory"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      type: "differential_test"
+      note: "Build one InMemoryGraph, run in-memory traverse; feed a fake run() that answers the compiled query FROM the same graph; assert TraversalResult equality."
+
+  # CRITICAL, LAST — the SACRED storage_agnostic_core invariant.
+  - id: "C-CYPHER-5"
+    statement: "cairn core imports NO database driver (no neo4j, falkordb, pyodbc, etc.) and this module reads no wall clock. compile_traversal is byte-stable across repeated calls. The driver enters only as the caller-supplied `run` callable."
+    assumption_status: "KNOWN"
+    conflict_prone: true
+    anti_pattern: "`import neo4j` / `from neo4j import GraphDatabase` inside the adapter 'so traverse_cypher can just connect'. That makes neo4j cairn's first hard runtime dep and collapses storage_agnostic_core (the core differentiator). The driver is ALWAYS the caller's; cairn only emits and maps."
+    test: "packages/cairn-engine/tests/unit/test_cypher.py::test_core_imports_no_db_driver"
+    test_provenance: "execution_derived"
+    execution_oracle:
+      type: "differential_test"
+      note: "Static-scan every core source file for DB-driver imports (assert none); compile the same traversal twice and assert byte-identical text+params."
+
+constraint_satisfiability:
+  count: 5
+  joint_satisfaction_test: "packages/cairn-engine/tests/unit/test_cypher.py::test_joint_cypher"
+  joint_note: >
+    One test: compile a bitemporal bounded traversal (C-1,C-2,C-3), execute it via
+    a fake run() that answers from an in-memory graph, assert the result equals
+    in-memory traverse WITH the same as_of filter (C-4), and assert no DB driver
+    is imported + the query is byte-stable (C-5) — all on the same query/graph.
+  conflicts_checked: >
+    C-5 (no driver import) vs C-4 (execute against a backend): no conflict — the
+    backend is reached only through the caller's `run` callable, which the TEST
+    supplies as a pure function over an in-memory graph. C-3 (depth literal) vs
+    C-5 (byte-stable): consistent — depth is a controlled int, deterministic.
+
+non_goals:
+  - "Shipping a real neo4j/falkordb driver (the caller brings it; see C-CYPHER-5)."
+  - "Gremlin / SPARQL compilation — OQ-3 for those backends is a later milestone; M2.3 resolves openCypher only."
+  - "Write-path / ingestion into the graph DB (cairn compiles READ traversals; loading the graph is the caller's ETL)."
+  - "PPR / beam-search traversal (OP-34 upgrade ladder) — the default stays bounded BFS closure."
+
+changelog:
+  - version: "0.1.0"
+    date: "2026-07-12"
+    change: "Initial intent for M2.3 graph-backend adapter. Resolves OQ-3 for openCypher: compile_traversal (pure, byte-stable) + traverse_cypher (executes via caller's driver callable, result identical to in-memory). Core imports no DB driver (storage_agnostic_core). 5 constraints, SACRED no-db-import (conflict_prone) last; joint_satisfaction_test defined."

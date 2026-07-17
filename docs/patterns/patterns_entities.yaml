@@ -1,0 +1,457 @@
+# patterns_entities.yaml
+# ============================================================
+# Subsystem: ENTITIES (Cairn Primitive B — Entity-First Routing)
+# Question: How does Cairn represent, resolve, traverse, and
+# version the entity map — the foundational data structure that
+# everything else (gate, orchestration, assembler) depends on?
+# ============================================================
+# Version: 1.0
+# Date: 2026-06-27
+# This file co-locates the ENTITY subsystem: its theoretical
+# foundations (TH-1..TH-5) and its operational patterns
+# (OP-28, OP-34, OP-35). Organized by subsystem, not by
+# abstraction level — to work on entities, read one file.
+#
+# Theory sources (docs/research/foundations/):
+#   1. CANONICALIZATION_EQUIVALENCE_CLASSES_RESEARCH_2026.md
+#   2. ENTITY_RELATIONSHIP_PROPERTY_GRAPH_RESEARCH_2026.md
+#   3. BITEMPORAL_DATA_MODEL_RESEARCH_2026.md
+#   4. GRAPH_TRAVERSAL_TRANSITIVE_CLOSURE_RESEARCH_2026.md
+#   5. CLOSED_WORLD_RELATIONAL_MODEL_RESEARCH_2026.md
+# Operational sources (docs/research/context|tools|databases/):
+#   ENTITY_RELATIONSHIP_RESOLUTION, WORLD_MODEL_TOOL_ROUTING,
+#   ENTITY_GRAPH_TRAVERSAL, ONTOLOGY_AUTHORING, FALKORDB_GRAPHITI,
+#   GRAPH_DATABASES_AND_ENTITY_LIBRARIES
+
+# ============================================================
+# SECTION 1 — THEORETICAL FOUNDATIONS
+# (the CS theory the entity subsystem is built on; each TH
+#  grounds one or more charter invariants and operational OPs)
+# ============================================================
+
+theoretical_foundations:
+
+  - id: TH-1
+    name: "Canonicalization over Equivalence Classes"
+    principle: "Entity resolution is the mapping of any surface form to the canonical representative of its equivalence class; entity merging is the union operation in a disjoint-set structure."
+    formal_statement: >
+      Define a relation R = 'refers-to-the-same-entity' over the set of surface forms. R is an
+      equivalence relation (reflexive, symmetric, transitive); it partitions surface forms into
+      equivalence classes (a quotient set). The canonical_id is the chosen representative of each
+      class. resolve(surface) = the representative of [surface]_R. Merging two classes (discovering
+      two canonical_ids are the same entity) is the Union-Find `union` operation; with union-by-rank
+      + path compression it runs in near-constant amortized time α(m,n) (inverse Ackermann).
+    source: "foundations/CANONICALIZATION_EQUIVALENCE_CLASSES_RESEARCH_2026.md"
+    key_sources: "Tarjan 1975 (JACM 22(2), α(m,n) bound); Fellegi-Sunter 1969 (JASA, record linkage decision regions); Unicode UAX#15 (NFKC canonicalization)"
+    grounds_invariant: "deterministic_resolution_no_llm"
+    grounds_patterns: "OP-28 (resolution cascade); OP-35 (merge procedure = Union-Find union)"
+    design_consequence: >
+      Because R is transitive, a merge must move the ENTIRE class (all aliases + reference forwarding),
+      not just the matched pair — this is exactly OP-35's merge_entities procedure. The Fellegi-Sunter
+      'possible link' band is the formal boundary where deterministic linkage stops; Cairn quarantines
+      that band to offline/build-time (the LLM arbiter tier), which is what keeps the hot path LLM-free.
+    confidence: "✓ primary sources verified; ~ the Cairn mapping is inferred"
+
+  - id: TH-2
+    name: "Labeled Property Graph as the Entity Map Model"
+    principle: "The entity map is a labeled property graph — not RDF triples, not relational tables — because navigation needs first-class edges with identity and properties."
+    formal_statement: >
+      A labeled property graph is G = (N, E, ρ, λ, σ): nodes N, edges E, an incidence function
+      ρ: E → N×N, a labeling function λ assigning type labels, and σ assigning properties to nodes
+      AND edges. This extends Chen's Entity-Relationship model (entity→node, relationship→edge,
+      attribute→property) and contrasts with RDF's (subject, predicate, object) triples, where
+      attaching data to a relationship requires reification (a costly extra node per statement).
+    source: "foundations/ENTITY_RELATIONSHIP_PROPERTY_GRAPH_RESEARCH_2026.md"
+    key_sources: "Chen 1976 (ACM TODS 1(1)); Codd 1970 (CACM 13(6)); RDF 1.1 (W3C Rec 2014); ISO/IEC 39075:2024 GQL; Angles et al. 2017 (ACM Computing Surveys 50(5))"
+    grounds_invariant: "storage_agnostic_core; explicit_canonical_ontology"
+    grounds_patterns: "OP-28 (canonical record + typed edges); OP-34 (traversal over the LPG); OP-35 (entity_type + alias schema)"
+    design_consequence: >
+      Edge identity + edge properties are load-bearing: the bi-temporal validity (TH-3) lives ON the
+      edge, which RDF cannot carry without reification. Relational tables make relationships implicit
+      (JOINs) — the wrong primitive for a navigation layer. RDF export remains possible as a future
+      interop ADAPTER, consistent with storage_agnostic_core.
+    confidence: "✓ primary sources verified (Chen, Codd, RDF, GQL, Angles)"
+
+  - id: TH-3
+    name: "Bitemporal State Model"
+    principle: "Entity and edge state must be tracked on two independent time axes — valid-time (when a fact was true) and transaction-time (when the system learned it) — because one timestamp conflates two different questions."
+    formal_statement: >
+      Each fact carries four columns: [valid_at, invalid_at] (valid-time, mutable, world truth) and
+      [created_at, expired_at] (transaction-time, append-only, system knowledge). Point-in-time queries
+      use a four-column predicate: 'what was TRUE at T' → valid_at ≤ T < invalid_at; 'what was KNOWN at
+      T' → created_at ≤ T < expired_at. Intervals are half-open [start, end). Temporal relations between
+      edges follow Allen's 13 interval relations (before, meets, overlaps, during, …).
+    source: "foundations/BITEMPORAL_DATA_MODEL_RESEARCH_2026.md"
+    key_sources: "Snodgrass & Ahn 1985 (SIGMOD, time taxonomy); SQL:2011 (ISO/IEC 9075:2011 system+application time); Allen 1983 (CACM 26(11), interval algebra); Graphiti arXiv:2501.13956 (t_valid/t_invalid, t'_created/t'_expired)"
+    grounds_invariant: "deterministic_resolution_no_llm (point-in-time queries must be reproducible)"
+    grounds_patterns: "OP-28 (bi_temporal_model); OP-34 (traversal temporal filter); OP-35 (four-column schema)"
+    design_consequence: >
+      A single timestamp breaks both audit ('what did I know') and correctness ('what was true').
+      RESOLVED (M2.1): the open-end sentinel is None == +∞; every interval is half-open [start, end),
+      implemented once in `_within` (entity/bitemporal.py). Transaction-time (known_from/known_until)
+      is caller-explicit — never a wall-clock read (byte-stability). Supersession = `supersede()`:
+      append-only, closes the old version's transaction-time at an explicit instant and appends the new
+      version (Allen `meets` on the known axis), old records never mutated or dropped.
+    confidence: "✓ primary sources verified incl. exact Graphiti field names"
+
+  - id: TH-4
+    name: "Bounded Transitive Closure for Traversal"
+    principle: "Relation closure is a bounded (depth-limited) transitive closure, not a full one — full closure degenerates to the entire connected component and forces all-pairs cost on a single-source problem."
+    formal_statement: >
+      Reachability/transitive closure (Warshall 1962) computes all reachable nodes; for retrieval that
+      is wrong — it returns the whole connected component. Cairn computes the k-hop neighborhood
+      (ego-network) of a seed entity via BFS, O(V+E), hop-ordered. Personalized PageRank (Haveliwala
+      2002, topic-sensitive; Page-Brin 1999) is the soft/decaying generalization: relevance propagates
+      from the seed with damping. Beam search is bounded best-first traversal.
+    source: "foundations/GRAPH_TRAVERSAL_TRANSITIVE_CLOSURE_RESEARCH_2026.md; context/ENTITY_GRAPH_TRAVERSAL_RESEARCH_2026.md (buildable spec)"
+    key_sources: "Warshall 1962 (JACM 9(1)); CLRS (BFS/DFS O(V+E)); Page-Brin et al. 1999 (Stanford TR 1999-66); Haveliwala 2002 (WWW 2002)"
+    grounds_invariant: "deterministic_resolution_no_llm; zero_llm_calls_on_hot_path"
+    grounds_patterns: "OP-34 (BFS depth=2, hop-distance discount)"
+    design_consequence: >
+      Bounded not full → depth=2 default (empirical QA peak). The hop-distance discount 1/(hop+1) is a
+      deterministic surrogate for PPR's decay — same shape, no random walk, byte-stable. PPR and beam
+      are the documented upgrade ladder for specialized adapters; the default stays plain BFS so it is
+      reproducible and LLM-free.
+    confidence: "✓ primary sources verified (Warshall, CLRS, PageRank, Haveliwala)"
+
+  - id: TH-5
+    name: "Closed World Assumption + Relational Separation (the keystone)"
+    principle: "Two design choices make Cairn deterministic and not-generative: (A) Closed World Assumption — representation without inference; (B) the relational model — data separated from the algorithms over it, not encapsulated into objects."
+    formal_statement: >
+      PART A (CWA): Classical ontologies (OWL/Description Logic) use the Open World Assumption — what is
+      not stated may still be true → an inference engine (subsumption, classification, entailment) is
+      required. Cairn uses the Closed World Assumption (Reiter 1978): failure-to-prove ⇒ negation. The
+      resolver implements negation-as-failure (Clark 1978, predicate completion if→iff): a miss returns
+      explicit 'unresolved', never a synthesized ID.
+      PART B (relational): Codd 1970 separates data (relations/tuples) from operations (relational
+      algebra). For 'algorithms sweeping over many typed records' this beats OOP, whose encapsulation of
+      state+behavior produces the object-relational impedance mismatch. ECS / Data-Oriented Design is the
+      relational model rediscovered (Entity=row, Component=column, System=query).
+    source: "foundations/CLOSED_WORLD_RELATIONAL_MODEL_RESEARCH_2026.md"
+    key_sources: "Reiter 1978 (On Closed World Data Bases); Clark 1978 (Negation as Failure); Codd 1970 (CACM 13(6)); Baader et al. Description Logic Handbook (OWA in DL/OWL)"
+    grounds_invariant: "deterministic_resolution_no_llm; zero_llm_calls_on_hot_path; storage_agnostic_core; explicit_canonical_ontology"
+    grounds_patterns: "ALL entity patterns — TH-5 is the substrate. Most direct: OP-28 (resolution returns explicit unresolved), OP-35 (alias table IS the closed world)."
+    design_consequence: >
+      This is the theory-level justification of the whole 'deterministic, not generative' thesis.
+      CWA → the hot path can be LLM-free because Cairn refuses open-world inference. Relational/ECS →
+      entities are IMMUTABLE VALUE RECORDS and the algorithms (gate, resolver, traversal, fusion,
+      assembler) live in core/ operating OVER entities — never methods ON entities.
+      TWO ENFORCEMENT POINTS for tech spec (currently ? assumed):
+        1. cwa_resolution_semantics — resolver returns explicit 'unresolved' on miss, never synthesizes.
+        2. entities_are_immutable_value_records — no entity class carries methods; behavior lives in core/.
+    confidence: "✓ primary sources verified; ~ Cairn mappings inferred; ? two enforcement points to confirm in tech spec"
+
+# ============================================================
+# SECTION 2 — OPERATIONAL PATTERNS
+# (entity-subsystem implementation decisions; moved from
+#  patterns_retrieval_knowledge.yaml v1.7 → here, v1.0)
+# ============================================================
+# NOTE: OP-28 retains its original tool-routing framing (World
+# Model for grounding tool args). For Cairn it is REUSED as the
+# entity-first RETRIEVAL routing pattern. The tool-routing vs
+# entity-retrieval framing should be reconciled in the tech spec.
+
+operational_patterns:
+
+  - id: OP-28
+    name: "World Model: Entity-Grounded Tool Routing"
+    question: "Before the agent calls a tool, how does it ground the tool's arguments in real, current entities — not hallucinated IDs?"
+    source: "tools/WORLD_MODEL_TOOL_ROUTING_RESEARCH_2026.md; tools/ENTITY_RELATIONSHIP_RESOLUTION_RESEARCH_2026.md; intent fast-path, reference-based request detection, confidence-threshold routing (routing research)"
+    definition: >
+      A World Model (WM) is a structured map of domain entities, their relations, and their mutable
+      state that grounds tool arguments BEFORE and after execution. It sits BEFORE Tool RAG in the
+      stack: Layer B (grounding) precedes Layer A (selection). Selecting the right tool with a
+      hallucinated or stale entity ID still fails.
+    layer_order:
+      pipeline: "User query → intent → WM resolve (entity grounding) → Tool RAG (entity-scoped selection) → tool call → WM update"
+      failure_if_reversed: >
+        Injecting tool schemas BEFORE entity resolution makes Layer A (selection) succeed while
+        Layer B (grounding) silently fails — the model picks the right tool and fills it with the
+        wrong/imagined ID (WORLD_MODEL Part 3.1)."
+    visibility_grounding:
+      rule: >
+        Tool arguments may ONLY reference entity IDs that are in the turn's visibility_set OR that
+        were returned by a search/link tool in the SAME turn. No tool arg may carry an ID the model
+        has not actually seen this turn.
+      evidence: "Graph Explorer (ACL 2026 Findings 387): training on traces where tool args ⊆ visible IDs → +22.5 Hit@1. Expert SPARQL assumes a global KG view; the agent only has a local prompt."
+      enforcement: "Server-side hard gate: reject any tool call whose entity ID ∉ visibility_set (see safety_protection). This is a validity oracle, not advisory."
+    entity_resolution_cascade:
+      source: "ENTITY_RELATIONSHIP_RESOLUTION_RESEARCH_2026.md; ARTER arXiv:2510.20098; Progressive ER arXiv:2503.08298"
+      stages: "exact-match → fuzzy string (RapidFuzz, <1ms) → semantic embedding similarity → LLM disambiguation"
+      llm_fires_only_when: "2+ candidates AND confidence in 0.70–0.85 band — LLM is the arbiter of last resort, not the primary linker"
+      entropy_gate: "Low-entropy/short strings ('mis autos') skip fuzzy matching (too many false positives on short strings) → route to exact lookup or LLM (Graphiti/Zep entropy gate)"
+      augment_not_replace: "Cheap bi-encoder retrieves candidates; LLM enriches candidate context; bi-encoder re-ranks. LLM as augmenter (LLMaEL arXiv:2407.04020, +8.9%), not primary linker."
+      problem_class_split: >
+        Entity resolution is not one problem: detection ≠ linking ≠ dedup ≠ relation extraction, each
+        needs different tooling. And the phases split by TIME — extraction/embedding is build-time
+        (offline, batch, vectorized); resolution/disambiguation is query-time (online, user- and
+        context-specific). Don't collapse them into one monolithic step.
+      known_failure_reversal: "Relation reversal ('reversal curse', Berglund ICLR 2024 — see FF-10) is an open failure: models extract (A parent-of B) but fail the inverse. Mitigation: store both directions explicitly, or constrain the schema so asymmetric relations require a mirror edge."
+    graph_vs_registry:
+      rule: "Route the retrieval paradigm; do not always materialize a graph (RAGSearch arXiv:2604.09666 — no universal winner: graph wins multi-hop, dense/registry wins simple lookup)"
+      registry_path: "0–1 hop, single entity, write target known, tight latency → flat entity registry"
+      graph_path: "≥2 hops, relation keywords ('who owns', 'path between'), multi-entity, global aggregate, relaxed latency → property graph / GraphRAG"
+      uncertain: "Registry first; escalate to graph on 404/empty"
+      backend_selection:
+        source: "databases/FALKORDB_GRAPHITI_DEEP_RESEARCH_2026.md; databases/GRAPH_DATABASES_AND_ENTITY_LIBRARIES_2026.md"
+        finding: "When the WM IS a graph, the backend substrate sets the latency ceiling. Algebraic (GraphBLAS / sparse-matrix) engines turn multi-hop BFS into matrix ops: FalkorDB p99 ~136ms vs Neo4j ~46,924ms on SNAP Pokec — multi-hop in <200ms vs pointer-chasing."
+        rule: "If entity state needs multi-hop traversal inside an interactive latency budget (<200ms), pick an algebraic/in-memory graph backend; if entity state is single-hop CRUD, a graph DB is over-engineering — use registry/relational."
+    bi_temporal_model:
+      source: "Graphiti arXiv:2501.13956 (Zep, ICLR 2026); see TH-3"
+      finding: >
+        Entity/edge state needs TWO independent time axes: valid-time (valid_at / invalid_at — when the
+        fact was true in the world) and ingestion-time (created_at / expired_at — when the system learned
+        it). They are not the same: a fact can be valid last Tuesday but ingested today.
+      enables:
+        point_in_time_knowledge: "'What did the agent KNOW on Tuesday?' → filter created_at ≤ T AND expired_at > T"
+        fact_validity: "'When was this actually TRUE?' → filter valid_at ≤ T AND invalid_at > T"
+        out_of_order_ingestion: "Sort on event/valid time, not insertion order — late-arriving facts slot into the correct historical position"
+      rule: "Model mutable entity state bi-temporally. A single timestamp conflates 'true then' with 'known then' and breaks both audit ('what did I know') and correctness ('what was true')."
+    cross_system_entity_index:
+      problem: "Tool systems become cold silos: the right tool is selected but the arg binds to the wrong namespace ID (system-A id vs system-B id vs symbol for the same 'Acme')"
+      fix: "Maintain a unified entity index mapping one canonical entity → {system_a_id, system_b_id, channel, doc_ids, symbols}; bind canonical → system-specific ID at tool-arg time"
+    temporal_version_sensitivity:
+      finding: "Entities carry valid_from / supersedes metadata; planning must use versioned state. VersionRAG: 58% → 90% on version-sensitive QA (arXiv:2604.20598)"
+      rule: "Never bind a tool arg to an entity version without checking it is current for the task's as-of time"
+    design_rule: |
+      Resolve entities to canonical IDs BEFORE Tool RAG — grounding precedes selection.
+      Constrain tool args to the visibility_set (or same-turn search/link results); enforce server-side.
+      Use the cheap-first resolution cascade; let the LLM arbitrate only genuine ambiguity.
+      Route graph-vs-registry by query shape; don't always build a graph (and pick an algebraic backend only when multi-hop latency demands it).
+      Carry a cross-system entity index so the same entity maps correctly across every tool's namespace.
+      Model mutable entity state bi-temporally (valid-time vs ingestion-time) so 'what was true' and 'what was known' never collapse.
+    ties_to: "TH-1 (resolution cascade = canonicalization); TH-3 (bi_temporal_model); TH-5 (CWA — explicit unresolved); process_architecture (WM state checkpoint + freshness-before-write); safety_protection (entity validity oracle + post-tool contradiction detection); OP-18 (Tool RAG runs AFTER resolve)."
+
+  - id: OP-34
+    name: "Entity Graph Traversal: Collecting Connected Content from a Canonical ID"
+    question: "Given a resolved canonical entity ID, how does Cairn walk the graph to collect the documents and facts connected to it — deterministically, storage-agnostically, without an LLM?"
+    source: "context/ENTITY_GRAPH_TRAVERSAL_RESEARCH_2026.md; foundations/GRAPH_TRAVERSAL_TRANSITIVE_CLOSURE_RESEARCH_2026.md (TH-4); GraphRAG arXiv:2404.16130; HippoRAG arXiv:2405.14831 (NeurIPS 2024); Think-on-Graph arXiv:2307.07697 (ICLR 2024); SAT-Graph RAG arXiv:2510.13590; Graphiti arXiv:2501.13956"
+    definition: >
+      Traversal for retrieval is NOT graph analytics — it collects DocumentRefs (doc IDs
+      and edge metadata) anchored to entity nodes and edges within a bounded hop radius.
+      It runs deterministically on the hot path via a GraphAdapter Protocol; the LLM appears
+      only at index time (to build the graph) and after retrieval (to generate the answer),
+      never during traversal.
+    traversal_strategies:
+      bfs_default:
+        algorithm: "Breadth-First Search, depth 2"
+        wins_when: "General entity-first queries, unknown graph density, multi-hop joins"
+        evidence: "Depth 2 is the empirical peak for most QA benchmarks (✓ HippoRAG NeurIPS 2024, Think-on-Graph ICLR 2024); depth 3+ needed only for complex multi-hop"
+        cost: "O(b^d) where b = avg branching factor, d = depth — prune aggressively"
+      beam_search:
+        algorithm: "BFS with width limit k — expand only top-k edges by weight at each level"
+        wins_when: "High-branching graphs where full BFS explodes; edge weights available"
+        evidence: "Think-on-Graph (ICLR 2024): beam pruning using relation weights (no LLM required) (~ inferred for Cairn)"
+      ppr_personalized:
+        algorithm: "Personalized PageRank from seed entity nodes"
+        wins_when: "Finding globally influential nodes connected to the seed — not Cairn's default use case"
+        evidence: "HippoRAG (NeurIPS 2024) uses PPR as its primary traversal (✓)"
+        cairn_note: "PPR is slower and harder to make storage-agnostic; reserve for specialized adapters"
+      dfs:
+        wins_when: "Deep single-path traces (rare in retrieval); usually outperformed by BFS for doc collection"
+    relation_closure:
+      definition: "The set of all (node, edge, doc_ref) reachable from a seed entity within depth d — a bounded transitive closure (TH-4)"
+      sub_decisions:
+        scope: "All neighbors vs typed-relation filter (e.g. only 'REFERENCES' and 'IMPLEMENTS' edges, not 'MENTIONED_IN')"
+        edge_weighting: "Hop-distance discount: score(node at depth d) = base_rel / (1 + d). No LLM — uses structural proximity."
+        bi_temporal: "Filter edges where valid_at ≤ now AND (invalid_at IS NULL OR invalid_at > now). Required for mutable entity state (TH-3)."
+      default: "All neighbors, hop-distance discount, bi-temporal filter active"
+    depth_vs_cost:
+      rule: "Default depth=2. Increase to depth=3 only when complexity_hint='multi_hop' (from gate, OP-33 Stage 1 multi-entity relational flag). Never depth > 3 on the hot path without a corpus-specific justification."
+      cost_table:
+        depth_1: "b docs — cheap, misses second-hop joins"
+        depth_2: "b² docs — right for most queries; catches join-set docs"
+        depth_3: "b³ docs — only for complex multi-hop; prune to k candidates"
+    flat_store_fallback:
+      description: "When no graph backend exists, traverse via an inverted index: entity_id → list[doc_id] built at index time."
+      behavior: "Returns depth-0 results only (docs that directly mention the entity). Tags output with traversal_mode='flat' so callers can escalate to graph adapter if available."
+      build_time: "Index entity_id occurrences during corpus ingestion. O(n) scan, no graph required."
+    community_detection:
+      description: "Global queries ('what's the big picture about X?') need community summaries, not local traversal."
+      decision_rule: "Route to community detection when: query has no specific entity mentions AND query asks for overview/summary/themes. Local BFS traversal is NOT the right algorithm for global queries."
+      evidence: "GraphRAG (arXiv:2404.16130) — local vs global query routing is explicit in the architecture (✓)"
+      cairn_placement: "Community detection is a separate strategy tier in the gate (OP-33), not part of OP-34 local traversal."
+    adapter_protocol:
+      interface: |
+        class GraphAdapter(Protocol):
+            def neighbors(self, entity_id: str, depth: int, config: TraversalConfig) -> list[TraversalNode]: ...
+            def flat_lookup(self, entity_id: str) -> list[str]: ...  # doc_ids only
+      storage_agnostic: "The core BFS algorithm calls only adapter.neighbors() — never touches the backend directly. In-memory dict, SQLite adjacency table, Neo4j, FalkorDB all implement the same Protocol."
+    design_rule: |
+      Default: BFS depth=2, all-neighbor scope, hop-distance discount, bi-temporal filter.
+      Flat-store fallback when no graph: inverted entity→doc_id index (depth=0).
+      Depth=3 only for multi-hop relational queries (flagged by gate Stage 1).
+      Community detection is a separate gate strategy — do not conflate with local traversal.
+      All traversal is storage-agnostic via GraphAdapter Protocol.
+      Traversal makes zero LLM calls. Edge weights and hop distance are the only scoring inputs.
+    ties_to: "TH-4 (bounded transitive closure); TH-2 (traversal over the LPG); OP-28 (entity resolution produces the canonical_id that seeds traversal); OP-32 (traversal output feeds RRF fusion alongside lexical + semantic signals); OP-33 (gate flags multi-hop relational → depth=3); OP-35 (ontology stores the edge types for typed-relation filtering)"
+
+  - id: OP-35
+    name: "Ontology Authoring: Building and Maintaining the Canonical Alias Table"
+    question: "How does a Cairn user bootstrap and maintain the canonical entity + alias table that makes deterministic resolution possible — without it becoming a blocker to adoption?"
+    source: "context/ONTOLOGY_AUTHORING_RESEARCH_2026.md; tools/ENTITY_RELATIONSHIP_RESOLUTION_RESEARCH_2026.md §1, §4.2-4.3, §5; Wikidata entity schema; GLiNER arXiv:2311.08526 (NAACL 2024); REBEL arXiv:2104.07650; ReLiK; LLMaEL arXiv:2407.04020; Graphiti arXiv:2501.13956 (MinHash dedup)"
+    definition: >
+      The canonical alias table is the build-time artifact that makes Cairn's hot path
+      LLM-free. It maps surface forms (and their aliases) to stable canonical IDs.
+      Building it is a one-time offline step with incremental maintenance — never on the
+      hot path, never blocking a query. It IS Cairn's closed world (TH-5).
+    minimal_schema:
+      required_fields:
+        canonical_id: "Stable slug: type::label (e.g. person::jane_doe, fn::authenticate_user, doc::payment_retry_policy)"
+        label: "Canonical human-readable name"
+        aliases: "list[str] — all surface forms that should resolve to this entity"
+        entity_type: "Controlled vocabulary: person | org | concept | function | document | config | system"
+        valid_from: "ISO 8601 — when this entity became active (null = always)"
+        source: "Where this entity was first observed (corpus path, manual)"
+      optional_fields:
+        description: "One-sentence description for disambiguation"
+        valid_until: "For deprecated entities"
+        merged_from: "list[canonical_id] — provenance when two IDs were merged"
+        metadata: "Open dict for corpus-specific fields"
+      exclude: "Embeddings and relations — those live in the graph/vector backend, not the alias table"
+    extraction_is_reliable_and_mostly_deterministic:
+      headline: >
+        The research is clear: build-time entity/relation extraction can be done RELIABLY by several
+        methods — and for the discriminative ones, reliably AND deterministically. Reliability and
+        determinism are NOT in tension here. Only the genuinely ambiguous tail (<5%) uses a generative
+        LLM, and that tail is quarantined to build-time + human review.
+      discriminative_methods:
+        property: "Reliable AND deterministic (same input → same output, byte-stable with fixed weights + greedy decode)"
+        evidence:
+          - "GLiNER (NAACL 2024): zero-shot NER beats ChatGPT and fine-tuned LLMs; CPU-viable; research calls build-time GLiNER/spaCy NER 'Deterministic and fast' (✓)"
+          - "ReLiK: SOTA in-domain AND OOD on entity-linking + relation-extraction; 40× faster than retriever-reader (✓)"
+          - "REBEL: 'fast, offline, deterministic baseline' for standard relation types (✓)"
+          - "Multi-agent ER (MDPI 2024): 94.3% accuracy on name-variation matching; 61% fewer API calls than single-LLM (✓)"
+          - "LLMaEL (arXiv:2407.04020): +8.9% over prior SOTA on 6 EL benchmarks — LLM augments candidates, bi-encoder re-ranks deterministically (✓)"
+        cairn_use: "Default build-time extractor. Research explicitly lists 'Reproducibility critical: same input → same output deterministically' as the regime where classical NER (spaCy/GLiNER) wins (✓)."
+      generative_llm_tail:
+        property: "Reliable but NOT deterministic — the only non-deterministic tier"
+        when: "Genuinely ambiguous cases only (2+ candidates in the 0.70–0.85 confidence band); open-ended/domain-specific types without training data"
+        frequency: "<5% of cases on a ~100-entity corpus (✓ ENTITY_RESOLUTION §5.2)"
+        gain: "+2.53% avg / +4.47% max over base; within 4.4% of GPT-4 at 58% fewer tokens; up to +16 pts in hard domains (biomedical) (✓)"
+        containment: "OFFLINE batch only, Instructor for schema enforcement, human sign-off before entering the table. Never on the hot path — that is the Graphiti failure mode Cairn inverts."
+      problem_split_needs_different_tools:
+        note: "Extraction is not one task (ENTITY_RESOLUTION §4.3): detection ≠ linking ≠ dedup ≠ relation extraction."
+        detection: "GLiNER, spaCy, fine-tuned BERT NER (deterministic)"
+        linking: "ReLiK, LLMaEL, custom alias lookup (deterministic)"
+        dedup: "MinHash/LSH + RapidFuzz, multi-agent ER (deterministic)"
+        relation_extraction: "REBEL (deterministic), ReLiK, or Instructor+LLM (generative tail)"
+      dominant_2025_production: "Hybrid: GLiNER detects spans (fast/cheap/deterministic) → ReLiK/Instructor link+RE on detected spans only (targeted, not every sentence). Minimizes LLM volume."
+
+    construction_strategies:
+      structured_sources_nearly_free:
+        when: "Source is a database or codebase"
+        method: "DB primary keys ARE canonical IDs (schema import); codebase symbols via AST/LSP"
+        property: "Deterministic, no NER needed — the cheapest and most reliable case"
+      discriminative_default:
+        when: "Unstructured text (files, prose), any corpus size"
+        method: "GLiNER/spaCy NER detection → ReLiK/alias linking → MinHash dedup. CPU-viable, batch."
+        property: "Reliable (90-94%+) AND deterministic with fixed weights"
+        review: "Human confirms the residual error (the 6-10%) ONCE; table is then frozen"
+      manual:
+        when: "< ~200 entities — fine to start here, but discriminative scales better than hand-curation"
+        time: "30–60 min for 50–100 entities"
+        advantage: "100% precision, no tooling"
+      llm_full_extraction:
+        when: "First-class OPT-IN for unstructured prose with open-ended concepts (blog posts, articles, lore) where a generative LLM extracts richer entities than discriminative NER"
+        constraint: "BUILD-TIME OFFLINE BATCH ONLY. Structured output (Instructor-style schema enforcement). Human review gate. Result enters the alias table and is FROZEN."
+        why_safe: "Determinism comes from the FREEZE, not the extractor. An LLM-extracted map, once frozen, serves byte-stable resolution forever. What breaks the thesis is LLM extraction on the hot path / per query (the Graphiti drift) — never the build-time use."
+        interface: "author_from_text(text, source, extractor='llm') — explicit opt-in; 'discriminative' remains the default"
+      llm_assisted_tail:
+        when: "The ambiguous <5% dedup band (0.70–0.85) when the default discriminative path is used"
+        constraint: "OFFLINE batch only. Instructor for schema enforcement. Human sign-off."
+        warning: "Never use generative LLM extraction on the hot path — that recreates the Graphiti drift Cairn inverts."
+    dedup_pipeline:
+      description: "Three-tier build-time dedup to prevent duplicate canonical IDs before they reach the alias table (= Union-Find class construction, TH-1)"
+      tier_1_exact:
+        method: "Exact match + normalized match (lowercase, strip punctuation, unicode NFKC)"
+        cost: "O(n) — always run first"
+      tier_2_fuzzy:
+        method: "MinHash/LSH (32 permutations, band size 4 → 8 bands) + RapidFuzz token-set ratio ≥ 0.85"
+        entropy_gate: "Skip fuzzy for strings with entropy < 1.5 (short/common tokens) — route to exact or LLM (Graphiti pattern)"
+        cost: "O(n log n) with LSH; use when n > ~1,000 candidates"
+        crossover: "Tier 2 beats pairwise O(n²) at ~1,000 candidates; below that, pairwise is fine"
+      tier_3_llm_offline:
+        method: "LLM judgment for ambiguous cases in 0.70–0.85 band — offline batch only (the Fellegi-Sunter 'possible link' band, TH-1)"
+        output: "merge Y/N + rationale logged for audit"
+    incremental_maintenance:
+      add_entity: "Append to YAML / INSERT to SQLite. Run dedup pipeline against existing entries. Stage in 'pending_review' status until human confirms canonical_id."
+      add_alias: "O(1) append to aliases list — no rebuild. Resolver picks it up on next load."
+      merge_entities:
+        trigger: "Two canonical_ids that refer to the same real entity discovered post-authoring"
+        procedure: "Choose primary_id. Copy all aliases to primary. Set merged_id.merged_from=[primary_id]. Set merged_id.valid_until=now. Forward all merged_id references to primary_id. Never delete — preserve for audit. (= Union-Find union, TH-1: move the whole class.)"
+      split_entity: "Creates a conflict (§ conflict_resolution). Assign new canonical_id; mark old aliases with disambiguates flag; alert human reviewer."
+    conflict_resolution:
+      authoring_time:
+        scoped_aliases: "Prefix alias with type: 'auth/user' vs 'payment/user' for same surface form in different contexts"
+        disambiguates_flag: "Marks a surface form that maps to multiple canonical IDs — resolver returns all matches for human/LLM arbiter (never silently picks one)"
+        conflict_audit_ci: "CI gate: fail if any unresolved alias maps to 2+ canonical IDs without a disambiguates flag"
+      query_time: "If surface form hits a disambiguates flag: return all candidates with confidence scores; gate (OP-33) escalates to LLM arbiter tier as last resort"
+    serialization:
+      yaml: "< 500 entities — human-editable, Git-versionable, zero tooling"
+      sqlite: "500–50k entities — AliasTableAdapter wraps sqlite3 (stdlib, no dep). Single .db file, storage-agnostic-friendly."
+      parquet: "> 50k entities — columnar, DuckDB-queryable, production-scale"
+      adapter_protocol: |
+        class AliasTableAdapter(Protocol):
+            def lookup(self, surface: str) -> list[ResolvedEntity]: ...
+            def add(self, entity: Entity) -> None: ...
+            def merge(self, source_id: str, target_id: str) -> None: ...
+    design_rule: |
+      Extraction is reliable AND mostly deterministic — lead with that, not with the LLM.
+      DEFAULT extractor = discriminative (GLiNER/spaCy detect → ReLiK/alias link → MinHash dedup):
+        90-94%+ accuracy, byte-stable with fixed weights, CPU-viable. Structured sources (DB keys,
+        codebase AST) are deterministic and nearly free.
+      The generative LLM is the TAIL (<5%, ambiguous band only) — offline batch, human sign-off, never hot path.
+      The human gate is quality-amortization (catch the residual 6-10% ONCE, then freeze), not a sign extraction is shaky.
+      Schema: canonical_id (type::label slug) + aliases + entity_type + valid_from + source. That's all.
+      Build-time dedup: exact → MinHash/LSH (fixed seed) → LLM-offline only for the ambiguous band. Entropy gate for short strings.
+      Incremental: add-alias is O(1). Merges use merged_from forwarding — never delete.
+      Disambiguates flag + CI gate catches conflicts before they reach the resolver.
+      Serialization adapts by corpus size: YAML → SQLite → Parquet. Same AliasTableAdapter Protocol throughout.
+      The alias table is built ONCE offline, then frozen. The determinism boundary is the frozen table, not the extraction process.
+    ties_to: "TH-1 (dedup = Union-Find class construction; merge moves whole class); TH-5 (alias table IS the closed world); OP-28 (entity resolution cascade consumes the alias table at query time); OP-33 (gate uses entity tail/head label from alias table metadata); OP-34 (traversal uses entity_type for typed-relation filtering); deterministic_resolution_no_llm invariant (alias table is why Tier 1-2 need no LLM)"
+
+# ============================================================
+# CHANGELOG
+# ============================================================
+
+changelog:
+  - version: "1.2"
+    date: "2026-06-29"
+    change: >
+      OP-35: promoted LLM extraction from tail-only to a FIRST-CLASS OPT-IN strategy
+      (llm_full_extraction) for unstructured prose with open-ended concepts — build-time
+      offline batch, structured output, human gate, result FROZEN. Interface:
+      author_from_text(..., extractor="llm"); "discriminative" remains the default.
+      llm_assisted_tail narrowed back to the <5% dedup band.
+    reason: >
+      Real use cases (WordPress/blog concept graphs) need full-text LLM concept extraction,
+      not just ambiguity arbitration. Safe because determinism comes from the freeze, not
+      the extractor — only hot-path/per-query LLM extraction (Graphiti drift) breaks the thesis.
+  - version: "1.1"
+    date: "2026-06-27"
+    change: >
+      OP-35 reframed against ENTITY_RELATIONSHIP_RESOLUTION research: extraction LEADS with
+      'reliable AND mostly deterministic' (discriminative methods — GLiNER/ReLiK/REBEL/multi-agent ER,
+      90-94%+ accuracy, byte-stable), with the generative LLM demoted to the <5% ambiguous tail.
+      Added extraction_is_reliable_and_mostly_deterministic block with verified research numbers;
+      reordered construction_strategies (structured-source / discriminative-default / manual / llm-tail);
+      design_rule now states the determinism boundary = the frozen table, not the extraction process.
+    reason: "Prior framing over-emphasized the LLM + human gate, implying extraction was fragile. The research shows the opposite: reliability and determinism are both achievable via discriminative methods; the LLM is the tail, not the default."
+  - version: "1.0"
+    date: "2026-06-27"
+    change: >
+      Created the ENTITY subsystem pattern file. Organized by subsystem (not abstraction level):
+      co-locates theory (TH-1..TH-5, from docs/research/foundations/) with operational patterns
+      (OP-28, OP-34, OP-35, moved verbatim from patterns_retrieval_knowledge.yaml v1.7).
+    reason: >
+      The entity map is Cairn's foundational subsystem (Primitive B); 4 of the 5 CS theories researched
+      are entity theories and the 5th (traversal) walks the entity graph. Co-locating theory + operational
+      in one file means working on entities reads one file. Mirrors the research/foundations/ structure.
+      First step of an eventual per-subsystem decomposition (gate / entities / orchestration / assembler / eval).
+    moved_from_retrieval_knowledge: "OP-28, OP-34, OP-35 (removed there in v1.8)"
+    open_items_for_tech_spec:
+      - "TH-3: pin open-end sentinel (NULL vs +∞) in OP-35 schema for half-open interval comparison"
+      - "TH-5: enforce cwa_resolution_semantics (resolver returns explicit unresolved, never synthesizes an ID)"
+      - "TH-5: enforce entities_are_immutable_value_records (no entity class carries methods; behavior in core/)"
+      - "OP-28: reconcile tool-routing framing vs entity-first retrieval framing"
