@@ -4,8 +4,9 @@
 </p>
 
 <p align="center">
+  <a href="https://pypi.org/project/cairn-engine/"><img src="https://img.shields.io/pypi/v/cairn-engine?style=flat-square&label=cairn-engine&color=blue" alt="PyPI — cairn-engine"></a>
+  <a href="https://pypi.org/project/cairn-retrieval/"><img src="https://img.shields.io/pypi/v/cairn-retrieval?style=flat-square&label=cairn-retrieval&color=blue" alt="PyPI — cairn-retrieval"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License"></a>
-  <a href="ROADMAP.md"><img src="https://img.shields.io/badge/status-0.1%20feature--complete%20%C2%B7%20pre--release-blue?style=flat-square" alt="Status"></a>
   <a href="https://github.com/leocelis/cairn/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/leocelis/cairn/ci.yml?branch=main&style=flat-square&label=tests" alt="Tests"></a>
   <img src="https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue?style=flat-square&logo=python&logoColor=white" alt="Python 3.11–3.13">
   <img src="https://img.shields.io/badge/dependencies-zero-brightgreen?style=flat-square" alt="Zero dependencies">
@@ -20,7 +21,7 @@ A **cairn** is a stack of stones left by travelers, marking the way for those wh
 
 Cairn is a **storage-agnostic routing and composition layer**, not a database. It orchestrates retrieval over stores you already have (files, SQL, vector DB, graph DB). It does **not** own storage, run LLM ingestion on the hot path, or dump an index into the prompt.
 
-**Status:** the entity engine and the retrieval layer are **feature-complete** (120 tests, ruff + mypy strict, zero runtime dependencies, byte-stable output). Pre-release: the benchmark phase (eval vs. agentic-grep / vector-RAG / Graphiti) is next — quality claims stay honest until it lands. See [`ROADMAP.md`](ROADMAP.md).
+**Status:** `cairn-engine` and `cairn-retrieval` are **released on PyPI** (0.1.0) — feature-complete, 120 tests, ruff + mypy strict, zero runtime dependencies, byte-stable output. Next: the benchmark phase (eval vs. agentic-grep / vector-RAG / Graphiti) — quality claims stay honest until it lands. See [`ROADMAP.md`](ROADMAP.md).
 
 ## Why
 
@@ -34,8 +35,8 @@ Always-on retrieval measurably hurts (SRACG, AAAI 2026: −2.6 to −3.6pp vs. n
 
 | Package | What it is | State |
 |---------|-----------|-------|
-| **`cairn-engine`** | The deterministic **entity / world-model engine** — resolution cascade (exact → normalized → fuzzy → opt-in semantic → opt-in constrained LLM arbiter), bounded bi-temporal traversal, ontology authoring with a mandatory human gate, cross-system entity index, storage adapters. Pure stdlib, zero dependencies. | feature-complete, ships first |
-| **`cairn-retrieval`** | The **agent-retrieval layer** on top — adaptive gate (OP-33), lexical BM25 + scan, opt-in semantic signal, RRF fusion, budgeted context assembler with trace manifest, and `retrieve()` end-to-end. Depends only on `cairn-engine`. | feature-complete, 0.x until benchmarked |
+| **`cairn-engine`** | The deterministic **entity / world-model engine** — resolution cascade (exact → normalized → fuzzy → opt-in semantic → opt-in constrained LLM arbiter), bounded bi-temporal traversal, ontology authoring with a mandatory human gate, cross-system entity index, storage adapters. Pure stdlib, zero dependencies. | [released on PyPI](https://pypi.org/project/cairn-engine/) |
+| **`cairn-retrieval`** | The **agent-retrieval layer** on top — adaptive gate (OP-33), lexical BM25 + scan, opt-in semantic signal, RRF fusion, budgeted context assembler with trace manifest, and `retrieve()` end-to-end. Depends only on `cairn-engine`. | [released on PyPI](https://pypi.org/project/cairn-retrieval/), 0.x until benchmarked |
 
 ## What's proven — and what's not
 
@@ -55,6 +56,12 @@ Cairn separates what is **test-enforced today** from what still needs the benchm
 Full test suite: **120 tests, ruff + mypy strict, byte-stable**, green on 3.11–3.13.
 
 ## Quickstart
+
+```bash
+pip install cairn-engine cairn-retrieval
+```
+
+Or from source, for development:
 
 ```bash
 git clone https://github.com/leocelis/cairn && cd cairn

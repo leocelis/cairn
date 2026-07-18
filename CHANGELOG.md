@@ -6,6 +6,12 @@ Versioning: [SemVer](https://semver.org/) per package.
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-07-18
+
+First public release. `cairn-engine` and `cairn-retrieval` published to PyPI;
+repository public at [github.com/leocelis/cairn](https://github.com/leocelis/cairn).
+Everything below was developed pre-release and ships as of this version.
+
 ### OSS-readiness audit pass (2026-07-15)
 
 **Changed**
