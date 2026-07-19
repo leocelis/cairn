@@ -53,6 +53,25 @@ packages/cairn-engine/
     └── integration/# cross-module end-to-end
 ```
 
-## License
+## License and Developer Certificate of Origin (DCO)
 
-MIT. By contributing you agree your contributions are MIT-licensed.
+MIT. By contributing you agree your contributions are licensed under the MIT
+License (inbound = outbound), and you retain copyright to your contribution.
+
+Contributions must be **signed off** under the [Developer Certificate of Origin
+1.1](https://developercertificate.org/). The DCO is a lightweight attestation
+that you wrote the contribution, or otherwise have the right to submit it under
+the project's license. It is not a copyright assignment and not a CLA.
+
+Add a sign-off line to each commit (this is what `git commit -s` produces):
+
+```
+Signed-off-by: Your Name <your.email@example.com>
+```
+
+By signing off you certify the DCO 1.1: that the contribution is your original
+work or is submitted with the rights to do so, and that you understand it is
+public and recorded. PRs without a sign-off may be asked to amend before merge.
+Do not submit code, data, or text you do not have the right to contribute under
+MIT (including proprietary code or AI-generated content encumbered by third-party
+terms).

@@ -6,6 +6,32 @@ Versioning: [SemVer](https://semver.org/) per package.
 
 ## [Unreleased]
 
+### Legal hardening (2026-07-19)
+
+- **Expanded `LEGAL.md`** from a claims-scope note to a full author-protection
+  document: added trademark reservation, an explicit patent position (MIT is
+  silent on patents; deliberate and family-consistent, with Apache-2.0 named as
+  the upgrade path and patent-litigation termination), a Your Responsibilities /
+  Acceptable Use section (legal compliance, your-data, not-for-high-risk-use),
+  No Professional Relationship, Indemnification, an explicit Limitation of
+  Liability (with a nominal cap), and Governing Law (Florida / Broward County,
+  matching the IVD/Horizon/EIF family). Data-transmission/processor sections were
+  intentionally omitted since Cairn has no hosted service and processes no data
+  for the author.
+- **Added `TERMS_OF_SERVICE.md`**: the acceptance vehicle ("by using, you agree")
+  that makes acceptable-use and indemnification enforceable, scoped honestly to a
+  downloadable library (no account, no server). Mirrors the family ToS and
+  cross-references LEGAL.md to avoid drift.
+- **`CONTRIBUTING.md`**: added a Developer Certificate of Origin (DCO 1.1)
+  sign-off requirement (`git commit -s`), protecting the project from
+  contributions the submitter had no right to make.
+- **`README.md`**: Legal section now points to both LEGAL.md and TERMS_OF_SERVICE.md.
+- Rationale: the MIT warranty disclaimer + liability limitation already shield
+  the author from a user who has issues with the software; these additions close
+  the patent, trademark, acceptable-use, and indemnification gaps and bring
+  Cairn to parity with the sibling projects. Not legal advice; author should have
+  counsel confirm before relying on any clause.
+
 ## [0.1.0] — 2026-07-18
 
 First public release. `cairn-engine` and `cairn-retrieval` published to PyPI;

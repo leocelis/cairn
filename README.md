@@ -189,7 +189,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md). The short version: intent before code,
 
 ## Legal
 
-See [`LEGAL.md`](LEGAL.md) for what Cairn is and is not, the scope of the research-cited and pre-benchmark claims, and the standard as-is disclaimer. Security policy: [`SECURITY.md`](SECURITY.md).
+See [`LEGAL.md`](LEGAL.md) for what Cairn is and is not, IP / trademark / patent terms, acceptable use, warranty disclaimer, limitation of liability, indemnification, and governing law, and [`TERMS_OF_SERVICE.md`](TERMS_OF_SERVICE.md) for the conditions of use you accept by using the software. Security policy: [`SECURITY.md`](SECURITY.md).
 
 ## License
 
