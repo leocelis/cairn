@@ -6,6 +6,16 @@ Versioning: [SemVer](https://semver.org/) per package.
 
 ## [Unreleased]
 
+### Repo hygiene (2026-07-19)
+
+- Removed `examples/graph.svg` from the repo. It was a generated demo artifact
+  that had been committed by mistake (its `.gitignore` entry carried an inline
+  comment, which `.gitignore` does not support, so the rule silently never
+  matched). Fixed the rule (comment on its own line) and verified `git
+  check-ignore` now catches the file, so regenerating it locally no longer
+  re-commits it. Non-secret content; removed clean-forward per standard OSS
+  practice (no history rewrite).
+
 ### Legal hardening (2026-07-19)
 
 - **Expanded `LEGAL.md`** from a claims-scope note to a full author-protection
