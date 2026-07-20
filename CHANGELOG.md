@@ -13,8 +13,12 @@ Versioning: [SemVer](https://semver.org/) per package.
   comment, which `.gitignore` does not support, so the rule silently never
   matched). Fixed the rule (comment on its own line) and verified `git
   check-ignore` now catches the file, so regenerating it locally no longer
-  re-commits it. Non-secret content; removed clean-forward per standard OSS
-  practice (no history rewrite).
+  re-commits it.
+- Purged the file from all git history (`git filter-repo`), then force-pushed
+  `main` and re-pointed the `v0.1.0` tag to the rewritten commit. The content
+  was non-secret (rendered demo labels), but the whole history was scrubbed for
+  cleanliness, consistent with the sibling projects. All commit SHAs prior to
+  this changed as a result.
 
 ### Legal hardening (2026-07-19)
 
