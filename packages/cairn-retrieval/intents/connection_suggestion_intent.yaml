@@ -6,7 +6,6 @@
 # Patterns: patterns_retrieval_knowledge.yaml OP-36 (connection suggestion),
 #           OP-33 (link_ranking — the node<->node measure this generalises).
 # Research: docs/research/foundations/LINK_PREDICTION_AND_CONNECTION_SUGGESTION_RESEARCH_2026.md
-# Feedback: docs/feedback/retrieval_ranking_feedback.yaml (round 1 boundaries honored)
 # Boundary note: this is RANKING (relevance), which lives in cairn-retrieval —
 #   NOT in the entity engine, whose traverse() only does structural bounded
 #   closure. The engine supplies the graph; this weighs a CANDIDATE against it.
@@ -115,7 +114,7 @@ constraint_satisfiability:
 rationale:
   decision: "Content-first (TF-IDF cosine, corpus IDF) with an optional seed-gated RA/AA structural term; scoring lives in cairn-retrieval, generalising link_ranking to a candidate."
   reasoning: "OP-36. A brand-new node has no edges, so structural indices (CN/AA/RA) are 0 — the cold-start regime, where the literature is consistent that content/attribute similarity is the signal (Lü & Zhou; Rahm & Bernstein linguistic matcher; cold-start link-prediction papers). Reusing concept_idf keeps one relevance mechanism, not two. The structural term is honestly gated on seeds because it is meaningless without at least one provisional edge."
-  evidence: "docs/research/foundations/LINK_PREDICTION_AND_CONNECTION_SUGGESTION_RESEARCH_2026.md; OP-36; feedback round 1 boundaries."
+  evidence: "docs/research/foundations/LINK_PREDICTION_AND_CONNECTION_SUGGESTION_RESEARCH_2026.md; OP-36; link_ranking ship boundaries."
   date: "2026-07-14"
   stakeholder: "Maintainer"
 
@@ -127,7 +126,7 @@ alternatives:
     rejected_because: "A cold-start candidate has NO edges — CN/AA/RA are all 0. Structural cannot be primary for a node that does not yet exist; content must lead."
     date_tested: "2026-07-14"
   - name: "Put candidate scoring in the engine's traverse()"
-    rejected_because: "traverse() does structural bounded closure over an EXISTING node; a not-yet-existing candidate scored by relevance is retrieval's job (OP-34 boundary, feedback round 1)."
+    rejected_because: "traverse() does structural bounded closure over an EXISTING node; a not-yet-existing candidate scored by relevance is retrieval's job (OP-34 / link_ranking ship boundaries)."
     date_tested: "2026-07-14"
 
 risks:
