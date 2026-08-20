@@ -1,0 +1,183 @@
+{
+  "schema": "architecture_class_seal_results.v1",
+  "completed_at": "2026-08-20T16:18:49.017445+00:00",
+  "manifest_sha": "ecfdac707466b26d",
+  "steps": {
+    "cairn_entity_resolution_C": {
+      "ok": true,
+      "contestant": "C",
+      "row": {
+        "domain": "entity_resolution",
+        "contestant": "C",
+        "contestant_label": "symbolic (Cairn resolve)",
+        "n_tasks": 22,
+        "correctness": 100.0,
+        "pass_at_k": 100.0,
+        "repeat": 3,
+        "policy_pass": 100.0,
+        "path_safety": 100.0,
+        "latency_ms_p99": null,
+        "cost_tokens": 0.0,
+        "corpus_or_run_ref": "entity_resolution n=22",
+        "notes": "deterministic; latency not timed in this harness"
+      }
+    },
+    "opa_test": {
+      "ok": true,
+      "returncode": 0,
+      "passed": 218,
+      "failed": 0,
+      "tail": "dge.highrisk_corpus_test.test_art27_fria_allows_clean: PASS (774.385\u00b5s)\n\n/Users/leocelis/workspace/complyedge/complyedge/rules/rego/complyedge/test/corpus_depth_t3_test.rego:55:\ndata.complyedge.corpus_depth_test.test_annex3_5b_allows_non_eu: PASS (376.854\u00b5s)\n/Users/leocelis/workspace/complyedge/complyedge/rules/rego/complyedge/test/corpus_depth_t3_test.rego:83:\ndata.complyedge.corpus_depth_test.test_emotion_permitted_notice_allows_non_eu: PASS (382.009\u00b5s)\n\n/Users/leocelis/workspace/complyedge/complyedge/rules/rego/complyedge/test/gpai_corpus_test.rego:16:\ndata.complyedge.gpai_corpus_test.test_training_summary_blocks: PASS (696.753\u00b5s)\n/Users/leocelis/workspace/complyedge/complyedge/rules/rego/complyedge/test/gpai_corpus_test.rego:20:\ndata.complyedge.gpai_corpus_test.test_training_summary_allows_clean: PASS (685.446\u00b5s)\n\n/Users/leocelis/workspace/complyedge/complyedge/rules/rego/complyedge/test/highrisk_corpus_test.rego:179:\ndata.complyedge.highrisk_corpus_test.test_highrisk_aggregator_fires: PASS (3.450421ms)\n/Users/leocelis/workspace/complyedge/complyedge/rules/rego/complyedge/test/highrisk_corpus_test.rego:183:\ndata.complyedge.highrisk_corpus_test.test_highrisk_aggregator_clean: PASS (3.787665ms)\n\n/Users/leocelis/workspace/complyedge/complyedge/rules/rego/complyedge/test/gpai_test.rego:116:\ndata.complyedge.gpai_test.test_aggregated_gpai_no_violation_for_safe_text: PASS (9.606244ms)\n--------------------------------------------------------------------------------\nPASS: 218/218\n"
+    },
+    "trustlint_corpus": {
+      "ok": true,
+      "scored": 60,
+      "matched": 26,
+      "errors": 0,
+      "correctness": 43.3,
+      "details": [
+        {
+          "id": "A5_SUBLIMINAL_001",
+          "expected": "block",
+          "actual": "block",
+          "passed": true,
+          "returncode": 1
+        },
+        {
+          "id": "A5_VULNERABILITY_001",
+          "expected": "block",
+          "actual": "block",
+          "passed": true,
+          "returncode": 1
+        },
+        {
+          "id": "A5_SOCIAL_SCORING_001",
+          "expected": "block",
+          "actual": "block",
+          "passed": true,
+          "returncode": 1
+        },
+        {
+          "id": "A5_SOCIAL_SCORING_002",
+          "expected": "block",
+          "actual": "block",
+          "passed": true,
+          "returncode": 1
+        },
+        {
+          "id": "A5_PREDICTIVE_POLICING_001",
+          "expected": "block",
+          "actual": "allow",
+          "passed": false,
+          "returncode": 0
+        },
+        {
+          "id": "A5_FACIAL_SCRAPING_001",
+          "expected": "block",
+          "actual": "allow",
+          "passed": false,
+          "returncode": 0
+        },
+        {
+          "id": "A5_EMOTION_WORKPLACE_001",
+          "expected": "block",
+          "actual": "block",
+          "passed": true,
+          "returncode": 1
+        },
+        {
+          "id": "A5_EMOTION_SCHOOL_001",
+          "expected": "block",
+          "actual": "block",
+          "passed": true,
+          "returncode": 1
+        },
+        {
+          "id": "A5_BIOMETRIC_CATEGORISATION_001",
+          "expected": "block",
+          "actual": "allow",
+          "passed": false,
+          "returncode": 0
+        },
+        {
+          "id": "A5_REALTIME_BIOMETRIC_001",
+          "expected": "block",
+          "actual": "allow",
+          "passed": false,
+          "returncode": 0
+        },
+        {
+          "id": "A50_CHATBOT_001",
+          "expected": "block",
+          "actual": "allow",
+          "passed": false,
+          "returncode": 0
+        },
+        {
+          "id": "A50_CHATBOT_002",
+          "expected": "block",
+          "actual": "allow",
+          "passed": false,
+          "returncode": 0
+        },
+        {
+          "id": "A50_DEEPFAKE_001",
+          "expected": "block",
+          "actual": "allow",
+          "passed": false,
+          "returncode": 0
+        },
+        {
+          "id": "A50_DEEPFAKE_CELEBRITY_001",
+          "expected": "block",
+          "actual": "allow",
+          "passed": false,
+          "returncode": 0
+        },
+        {
+          "id": "A50_SYNTHETIC_MEDIA_001",
+          "expected": "block",
+          "actual": "allow",
+          "passed": false,
+          "returncode": 0
+        },
+        {
+          "id": "A50_GPAI_CONTENT_001",
+          "expected": "block",
+          "actual": "allow",
+          "passed": false,
+          "returncode": 0
+        },
+        {
+          "id": "A50_EMOTION_TRANSPARENCY_001",
+          "expected": "block",
+          "actual": "block",
+          "passed": true,
+          "returncode": 1
+        },
+        {
+          "id": "A50_BIOMETRIC_CATEGORISATION_TRANSPARENCY_001",
+          "expected": "block",
+          "actual": "block",
+          "passed": true,
+          "returncode": 1
+        },
+        {
+          "id": "EDGE_NEAR_MISS_SOX_001",
+          "expected": "allow",
+          "actual": "allow",
+          "passed": true,
+          "returncode": 0
+        },
+        {
+          "id": "EDGE_RESEARCH_DEEPFAKE_001",
+          "expected": "allow",
+          "actual": "allow",
+          "passed": true,
+          "returncode": 0
+        }
+      ]
+    }
+  },
+  "ok": true
+}
