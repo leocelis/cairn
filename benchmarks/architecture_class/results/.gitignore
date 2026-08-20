@@ -1,0 +1,4 @@
+# Ignore generated leaderboards; keep the directory via README.
+*
+!.gitignore
+!README.md
