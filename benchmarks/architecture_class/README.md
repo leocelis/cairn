@@ -37,8 +37,17 @@ python scorecard.py --domains compliance \
 
 Outputs land in `results/leaderboard_latest.json` and `results/leaderboard_latest.md`.
 
-## What this is not
+## Sealed offline harness
 
-- Not a product SKU or procurement line
-- Not LLM-as-judge scoring (success is exact-match / labeled expected_decision)
-- Not a substitute for sealed offline eval (separate harness step)
+```bash
+# Pin corpus/model, then score into scorer-owned seal/ (Cairn C + opa test + TrustLint)
+python sealed_harness.py --repeat 3 --force
+python sealed_harness.py --verify
+
+# Optional: CE tree (defaults to ../../complyedge/complyedge when present)
+python sealed_harness.py --ce-root /path/to/complyedge --repeat 3 --force
+```
+
+Requires on PATH for the CE steps: `opa`, `trustlint`. Entity-resolution C needs only Cairn. For CE prompt loading, install `PyYAML` in the Cairn venv (`pip install PyYAML`).
+
+Anti-cheat: pins go to `seal/manifest.json` **before** scoring; agents under test must not write `seal/`.

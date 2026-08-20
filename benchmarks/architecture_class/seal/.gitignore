@@ -1,0 +1,3 @@
+# Seal outputs are reproducible evidence — track them when a run is intentional.
+# Ignore only editor junk.
+.DS_Store
