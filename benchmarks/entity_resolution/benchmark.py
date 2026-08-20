@@ -17,6 +17,12 @@ An optional --llm mode replaces the slugify baseline with a real model (the
 consumer "guesses" the id), and feeds Cairn's candidates to the same model in the
 treatment arm — to confirm the deterministic result holds with a model in the loop.
 
+pass^k (--repeat K)
+-------------------
+Each item is evaluated K times. An item counts as a pass only if ALL K trials
+succeed (strict pass^k). Deterministic arms are stable under K>1; LLM arms
+expose nondeterminism.
+
 Dataset
 -------
 Fully synthetic and public — classic fictional companies (Contoso, Fabrikam,
@@ -31,6 +37,7 @@ Reproduce
     pip install cairn-engine
     python benchmark.py            # deterministic, no API key, byte-stable
     python benchmark.py --llm      # optional: real model in the loop (needs OPENAI_API_KEY)
+    python benchmark.py --repeat 3 # pass^3 on the deterministic arms
 """
 
 from __future__ import annotations
@@ -131,6 +138,42 @@ def _ask(client, prompt: str, model: str) -> str:
     return (r.choices[0].message.content or "").strip().strip(".`'\"")
 
 
+def pass_at_k(trial_oks: list[bool]) -> bool:
+    """Strict pass^k: True only if every trial succeeded."""
+    return bool(trial_oks) and all(trial_oks)
+
+
+def evaluate_item(
+    it: Item,
+    table: InMemoryAliasTable,
+    client,
+    llm_model: str | None,
+    repeat: int,
+) -> tuple[bool, bool, str, str]:
+    """Return (baseline_pass_at_k, cairn_pass_at_k, last_base, last_cairn)."""
+    truth = it.canonical_id.lower()
+    base_oks: list[bool] = []
+    cair_oks: list[bool] = []
+    base = ""
+    cair = ""
+    for _ in range(repeat):
+        if client:
+            base = _ask(client, f'Reference: "{it.name}"', llm_model).lower()
+            cand = [c.canonical_id.split("::", 1)[1] for c in resolve(it.name, table=table)[0]]
+            cair = _ask(
+                client,
+                f'Reference: "{it.name}"\nResolved candidates: {cand or "none"}.\n'
+                f"Pick the one id.",
+                llm_model,
+            ).lower()
+        else:
+            base = baseline_derive(it).lower()
+            cair = cairn_resolve(it, table).lower()
+        base_oks.append(base == truth)
+        cair_oks.append(cair == truth)
+    return pass_at_k(base_oks), pass_at_k(cair_oks), base, cair
+
+
 # --------------------------------------------------------------------------- #
 # Run                                                                         #
 # --------------------------------------------------------------------------- #
@@ -138,7 +181,16 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--llm", metavar="MODEL", nargs="?", const="gpt-4o-mini", default=None,
                     help="run the model-in-the-loop variant (needs OPENAI_API_KEY)")
+    ap.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        metavar="K",
+        help="pass^k: evaluate each item K times; pass only if all K succeed (default 1)",
+    )
     args = ap.parse_args()
+    if args.repeat < 1:
+        raise SystemExit("--repeat must be >= 1")
 
     table = build_table()
     client = _llm_client() if args.llm else None
@@ -146,16 +198,10 @@ def main() -> None:
     agg: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0])  # cat -> [n, base_ok, cairn_ok]
     diffs: list[str] = []
     for it in DATASET:
+        b_ok, c_ok, base, cair = evaluate_item(
+            it, table, client, args.llm, args.repeat
+        )
         truth = it.canonical_id.lower()
-        if client:
-            base = _ask(client, f'Reference: "{it.name}"', args.llm).lower()
-            cand = [c.canonical_id.split("::", 1)[1] for c in resolve(it.name, table=table)[0]]
-            cair = _ask(client, f'Reference: "{it.name}"\nResolved candidates: {cand or "none"}.\n'
-                        f"Pick the one id.", args.llm).lower()
-        else:
-            base = baseline_derive(it).lower()
-            cair = cairn_resolve(it, table).lower()
-        b_ok, c_ok = base == truth, cair == truth
         agg[it.category][0] += 1
         agg[it.category][1] += b_ok
         agg[it.category][2] += c_ok
@@ -167,10 +213,14 @@ def main() -> None:
     b = sum(v[1] for v in agg.values())
     c = sum(v[2] for v in agg.values())
     mode = f"LLM in the loop ({args.llm})" if client else "deterministic (slugify baseline)"
+    if args.repeat > 1:
+        mode += f" · pass^{args.repeat}"
 
     print("=" * 74)
     print(f"cairn-engine — entity-resolution grounding benchmark  [{mode}]")
     print("=" * 74)
+    if args.repeat > 1:
+        print(f"pass^{args.repeat}: item counts only if all {args.repeat} trials succeed")
     print(f"{'category':30}{'n':>3}  {'baseline':>10}  {'+ Cairn':>10}")
     print("-" * 74)
     for cat in sorted(agg):
@@ -178,7 +228,7 @@ def main() -> None:
         print(f"{cat:30}{nn:>3}  {bo}/{nn} ={100*bo//nn:>4}%  {co}/{nn} ={100*co//nn:>4}%")
     print("-" * 74)
     print(f"{'OVERALL':30}{n:>3}  {b}/{n} ={100*b//n:>4}%  {c}/{n} ={100*c//n:>4}%")
-    print(f"\ncorrect-id accuracy: {100*b//n}% -> {100*c//n}%   "
+    print(f"\ncorrect-id accuracy (pass^{args.repeat}): {100*b//n}% -> {100*c//n}%   "
           f"errors: {n-b} -> {n-c}  ({100*(n-b-(n-c))//max(n-b,1)}% of errors eliminated)")
     if diffs:
         print("\ntasks where the two resolvers disagree:")
