@@ -1,0 +1,167 @@
+{
+  "schema": "architecture_class_er_tasks.v1",
+  "n": 22,
+  "corpus_sha_pin": "18f2193c3c2b565a",
+  "tasks": [
+    {
+      "kind": "company",
+      "canonical_id": "northwind-traders",
+      "name": "Northwind Traders",
+      "category": "company: clean id",
+      "aliases": []
+    },
+    {
+      "kind": "company",
+      "canonical_id": "fabrikam",
+      "name": "Fabrikam",
+      "category": "company: clean id",
+      "aliases": []
+    },
+    {
+      "kind": "company",
+      "canonical_id": "adventure-works",
+      "name": "Adventure Works",
+      "category": "company: clean id",
+      "aliases": []
+    },
+    {
+      "kind": "company",
+      "canonical_id": "tailspin-toys",
+      "name": "Tailspin Toys",
+      "category": "company: clean id",
+      "aliases": []
+    },
+    {
+      "kind": "company",
+      "canonical_id": "proseware",
+      "name": "Proseware",
+      "category": "company: clean id",
+      "aliases": []
+    },
+    {
+      "kind": "company",
+      "canonical_id": "globex-inc",
+      "name": "Globex AI Inc",
+      "category": "company: irregular id",
+      "aliases": []
+    },
+    {
+      "kind": "company",
+      "canonical_id": "initech",
+      "name": "Initech.io",
+      "category": "company: irregular id",
+      "aliases": []
+    },
+    {
+      "kind": "company",
+      "canonical_id": "hooli-net",
+      "name": "Hooli Networks",
+      "category": "company: irregular id",
+      "aliases": []
+    },
+    {
+      "kind": "company",
+      "canonical_id": "umbrella-corp",
+      "name": "Umbrella Corporation",
+      "category": "company: irregular id",
+      "aliases": []
+    },
+    {
+      "kind": "company",
+      "canonical_id": "stark",
+      "name": "Stark Industries LLC",
+      "category": "company: irregular id",
+      "aliases": []
+    },
+    {
+      "kind": "company",
+      "canonical_id": "wayne-ent",
+      "name": "Wayne Enterprises",
+      "category": "company: irregular id",
+      "aliases": []
+    },
+    {
+      "kind": "company",
+      "canonical_id": "cyberdyne-sys",
+      "name": "Cyberdyne Systems",
+      "category": "company: irregular id",
+      "aliases": []
+    },
+    {
+      "kind": "person",
+      "canonical_id": "sam-carter",
+      "name": "Sam Carter",
+      "category": "person: clean id",
+      "aliases": []
+    },
+    {
+      "kind": "person",
+      "canonical_id": "alex-rivera",
+      "name": "Alex Rivera",
+      "category": "person: clean id",
+      "aliases": []
+    },
+    {
+      "kind": "person",
+      "canonical_id": "jordan-lee",
+      "name": "Jordan Lee",
+      "category": "person: clean id",
+      "aliases": []
+    },
+    {
+      "kind": "person",
+      "canonical_id": "riya-patel",
+      "name": "Riya Patel",
+      "category": "person: clean id",
+      "aliases": []
+    },
+    {
+      "kind": "person",
+      "canonical_id": "sam-o-brien",
+      "name": "Sam O'Brien",
+      "category": "person: punctuation/accents",
+      "aliases": []
+    },
+    {
+      "kind": "person",
+      "canonical_id": "renee-dubois",
+      "name": "Ren\u00e9e Dubois",
+      "category": "person: punctuation/accents",
+      "aliases": []
+    },
+    {
+      "kind": "person",
+      "canonical_id": "jose-garcia",
+      "name": "Jos\u00e9 Garc\u00eda",
+      "category": "person: punctuation/accents",
+      "aliases": []
+    },
+    {
+      "kind": "stock",
+      "canonical_id": "HOOL",
+      "name": "HOOL",
+      "category": "stock: ticker",
+      "aliases": [
+        "Hooli Networks"
+      ]
+    },
+    {
+      "kind": "stock",
+      "canonical_id": "NRTH",
+      "name": "NRTH",
+      "category": "stock: ticker",
+      "aliases": [
+        "Northwind Traders"
+      ]
+    },
+    {
+      "kind": "stock",
+      "canonical_id": "GLBX",
+      "name": "GLBX",
+      "category": "stock: ticker",
+      "aliases": [
+        "Globex"
+      ]
+    }
+  ]
+}

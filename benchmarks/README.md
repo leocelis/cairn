@@ -7,7 +7,7 @@ well as accuracy. Datasets are synthetic and public — no private data.
 | Benchmark | Measures | Headline (deterministic) |
 |---|---|---|
 | [`entity_resolution/`](entity_resolution/) | Does Cairn grounding raise correct-canonical-id rate vs. deriving the id? | correct-id accuracy **59% → 100%** (all errors eliminated) |
-| [`architecture_class/`](architecture_class/) | Unified A/B/C scorecard across entity-resolution + compliance artifacts | one row per (domain, contestant) |
+| [`architecture_class/`](architecture_class/) | Unified A/B/C scorecard across entity-resolution + compliance artifacts | one row per (domain, contestant); see [`architecture_class/public_pack/`](architecture_class/public_pack/) |
 
 Not yet here (see repo `ROADMAP.md`): **OP-31 retrieval-quality eval** — end-to-end
 answer quality vs. agentic-grep / vector-RAG / Graphiti. Until it lands, Cairn's

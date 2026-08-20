@@ -1,0 +1,112 @@
+{
+  "schema": "architecture_class_seal_results.v1",
+  "completed_at": "2026-08-20T16:18:49.017445+00:00",
+  "manifest_sha": "ecfdac707466b26d",
+  "steps": {
+    "cairn_entity_resolution_C": {
+      "ok": true,
+      "contestant": "C",
+      "row": {
+        "domain": "entity_resolution",
+        "contestant": "C",
+        "contestant_label": "symbolic (Cairn resolve)",
+        "n_tasks": 22,
+        "correctness": 100.0,
+        "pass_at_k": 100.0,
+        "repeat": 3,
+        "policy_pass": 100.0,
+        "path_safety": 100.0,
+        "latency_ms_p99": null,
+        "cost_tokens": 0.0,
+        "corpus_or_run_ref": "entity_resolution n=22",
+        "notes": "deterministic; latency not timed in this harness"
+      }
+    },
+    "opa_test": {
+      "ok": true,
+      "returncode": 0,
+      "passed": 218,
+      "failed": 0
+    },
+    "trustlint_corpus": {
+      "ok": true,
+      "scored": 60,
+      "matched": 26,
+      "errors": 0,
+      "correctness": 43.3,
+      "details": [
+        {
+          "id": "A5_SUBLIMINAL_001",
+          "expected": "block",
+          "actual": "block",
+          "passed": true,
+          "returncode": 1
+        },
+        {
+          "id": "A5_VULNERABILITY_001",
+          "expected": "block",
+          "actual": "block",
+          "passed": true,
+          "returncode": 1
+        },
+        {
+          "id": "A5_SOCIAL_SCORING_001",
+          "expected": "block",
+          "actual": "block",
+          "passed": true,
+          "returncode": 1
+        },
+        {
+          "id": "A5_SOCIAL_SCORING_002",
+          "expected": "block",
+          "actual": "block",
+          "passed": true,
+          "returncode": 1
+        },
+        {
+          "id": "A5_PREDICTIVE_POLICING_001",
+          "expected": "block",
+          "actual": "allow",
+          "passed": false,
+          "returncode": 0
+        },
+        {
+          "id": "A5_FACIAL_SCRAPING_001",
+          "expected": "block",
+          "actual": "allow",
+          "passed": false,
+          "returncode": 0
+        },
+        {
+          "id": "A5_EMOTION_WORKPLACE_001",
+          "expected": "block",
+          "actual": "block",
+          "passed": true,
+          "returncode": 1
+        },
+        {
+          "id": "A5_EMOTION_SCHOOL_001",
+          "expected": "block",
+          "actual": "block",
+          "passed": true,
+          "returncode": 1
+        },
+        {
+          "id": "A5_BIOMETRIC_CATEGORISATION_001",
+          "expected": "block",
+          "actual": "allow",
+          "passed": false,
+          "returncode": 0
+        },
+        {
+          "id": "A5_REALTIME_BIOMETRIC_001",
+          "expected": "block",
+          "actual": "allow",
+          "passed": false,
+          "returncode": 0
+        }
+      ]
+    }
+  },
+  "ok": true
+}

@@ -1,0 +1,64 @@
+{
+  "schema": "architecture_class_public_leaderboard.v1",
+  "generated_at": "2026-08-20T16:22:21.526715+00:00",
+  "contestants": {
+    "A": "pure LLM",
+    "B": "hybrid LLM+symbolic",
+    "C": "symbolic-only"
+  },
+  "pins": {
+    "entity_resolution_corpus_sha": "18f2193c3c2b565a",
+    "model": "none (sealed offline C)"
+  },
+  "rows": [
+    {
+      "domain": "entity_resolution",
+      "contestant": "C",
+      "contestant_label": "symbolic (Cairn resolve)",
+      "n_tasks": 22,
+      "correctness": 100.0,
+      "pass_at_k": 100.0,
+      "repeat": 3,
+      "policy_pass": 100.0,
+      "path_safety": 100.0,
+      "latency_ms_p99": null,
+      "cost_tokens": 0.0,
+      "corpus_or_run_ref": "entity_resolution n=22",
+      "notes": "deterministic; latency not timed in this harness"
+    },
+    {
+      "domain": "compliance",
+      "contestant": "C",
+      "contestant_label": "symbolic (OPA corpus tests)",
+      "n_tasks": 218,
+      "correctness": 100.0,
+      "pass_at_k": 100.0,
+      "repeat": 1,
+      "policy_pass": 100.0,
+      "path_safety": 100.0,
+      "latency_ms_p99": null,
+      "cost_tokens": 0.0,
+      "corpus_or_run_ref": "opa test PASS 218/218",
+      "notes": "offline sealed; machine-checkable Rego corpus"
+    },
+    {
+      "domain": "compliance",
+      "contestant": "C",
+      "contestant_label": "symbolic (TrustLint offline)",
+      "n_tasks": 60,
+      "correctness": 43.3,
+      "pass_at_k": 43.3,
+      "repeat": 1,
+      "policy_pass": 43.3,
+      "path_safety": 100.0,
+      "latency_ms_p99": null,
+      "cost_tokens": 0.0,
+      "corpus_or_run_ref": "CE runtime_benchmark prompts (60)",
+      "notes": "offline proxy vs labeled expected_decision; TrustLint rule subset \u2260 full OPA path"
+    }
+  ],
+  "pending_arms": [
+    "entity_resolution A/B (needs --llm + API key on scorecard.py)",
+    "compliance A/B (CE --engine llm-only / hybrid JSON artifacts)"
+  ]
+}
