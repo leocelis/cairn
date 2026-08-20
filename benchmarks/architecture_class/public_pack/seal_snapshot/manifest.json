@@ -1,0 +1,27 @@
+{
+  "schema": "architecture_class_seal.v1",
+  "sealed_at": "2026-08-20T16:19:52.571110+00:00",
+  "pins": {
+    "model": "none",
+    "repeat": 3,
+    "entity_resolution_corpus_sha": "18f2193c3c2b565a",
+    "entity_resolution_n": 22,
+    "compliance_prompt_corpus_sha": "40049b94d5301dad",
+    "compliance_prompt_n": 60,
+    "opa_rules_sha": "57e64496587ba89f",
+    "cairn_git_sha": "6babc7f23b0fd085f38d146395cbdaf158ae5f12",
+    "complyedge_git_sha": "88a8fc6ca6dfa52c482e9dd7ffe7d615d0eb896d",
+    "opa_version": "Version: 1.18.2",
+    "trustlint_version": "trustlint, version 2.0.3"
+  },
+  "paths": {
+    "seal_dir": "benchmarks/architecture_class/seal",
+    "ce_root": "complyedge/complyedge",
+    "cairn_root": "."
+  },
+  "anti_cheat": {
+    "scorer_owned_dir": "benchmarks/architecture_class/seal",
+    "rule": "Agent under test must not write to seal/. Pins are frozen before scoring; --verify detects corpus/rules drift."
+  },
+  "manifest_sha": "9e0967e3359e8580"
+}

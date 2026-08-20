@@ -51,3 +51,9 @@ python sealed_harness.py --ce-root /path/to/complyedge --repeat 3 --force
 Requires on PATH for the CE steps: `opa`, `trustlint`. Entity-resolution C needs only Cairn. For CE prompt loading, install `PyYAML` in the Cairn venv (`pip install PyYAML`).
 
 Anti-cheat: pins go to `seal/manifest.json` **before** scoring; agents under test must not write `seal/`.
+
+## Public publish pack
+
+Ready-to-publish surface (tasks + leaderboard + seal snapshot + harness docs):
+
+[`public_pack/`](public_pack/) — rebuild with `python build_public_pack.py`.
