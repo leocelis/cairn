@@ -252,7 +252,12 @@ def run_opa_test(ce_root: Path) -> dict[str, Any]:
         "returncode": proc.returncode,
         "passed": passed,
         "failed": failed,
-        "tail": (proc.stdout + proc.stderr)[-1500:],
+        # Scrub absolute home/workspace paths so seal artifacts are machine-portable.
+        "tail": re.sub(
+            r"/Users/[^/\s]+/workspace/",
+            "<workspace>/",
+            (proc.stdout + proc.stderr)[-1500:],
+        ),
     }
 
 
