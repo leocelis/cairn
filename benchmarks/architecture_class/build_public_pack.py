@@ -29,7 +29,7 @@ ER_BENCH = HERE.parent / "entity_resolution" / "benchmark.py"
 
 ABS_PATH_RE = re.compile(r"/Users/[^/\s]+/workspace/")
 BANNED_RE = re.compile(
-    r"Trello|CQcLXiMu|[private-vault-removed]/|P27\b|WANT\b|SHOULD\b|Cosmic Rewind|"
+    r"Trello|CQcLXiMu|limitless/|P27\b|WANT\b|SHOULD\b|Cosmic Rewind|"
     r"M\d+\.\d+|card #|HITL|docs/dd/",
     re.IGNORECASE,
 )
