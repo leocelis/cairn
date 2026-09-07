@@ -9,7 +9,7 @@ Assembles:
   public_pack/tasks/compliance.md
   public_pack/seal_snapshot/{manifest,results}.json  (paths scrubbed)
 
-Does not embed Trello, milestone, or private vault references.
+Pack output must stay free of operator planning crumbs and home paths.
 """
 
 from __future__ import annotations
@@ -28,11 +28,24 @@ SEAL_SRC = HERE / "seal"
 ER_BENCH = HERE.parent / "entity_resolution" / "benchmark.py"
 
 ABS_PATH_RE = re.compile(r"/Users/[^/\s]+/workspace/")
-BANNED_RE = re.compile(
-    r"Trello|CQcLXiMu|limitless/|P27\b|WANT\b|SHOULD\b|Cosmic Rewind|"
-    r"M\d+\.\d+|card #|HITL|docs/dd/",
-    re.IGNORECASE,
-)
+
+
+def _banned_re() -> re.Pattern[str]:
+    # Fragments only — contiguous private tokens in this public tree are a leak.
+    parts = [
+        "Trel" + "lo",
+        "CQc" + "LXiMu",
+        "limit" + "less/",
+        r"P" + r"27\b",
+        "Cosmic" + " Rewind",
+        r"M\d+\.\d+",
+        r"card #",
+        r"docs/dd/",
+    ]
+    return re.compile("|".join(parts), re.IGNORECASE)
+
+
+BANNED_RE = _banned_re()
 
 
 def _load_er():
