@@ -28,6 +28,7 @@ dev = [
     "pytest-cov>=5",
     "mypy>=1.10",
     "ruff>=0.5",
+    "complyedge>=0.2.21",  # examples only: guards the agent's LLM call
 ]
 
 [tool.pytest.ini_options]

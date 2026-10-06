@@ -11,6 +11,9 @@
   <img src="https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue?style=flat-square&logo=python&logoColor=white" alt="Python 3.11–3.13">
   <img src="https://img.shields.io/badge/dependencies-zero-brightgreen?style=flat-square" alt="Zero dependencies">
   <a href="https://ivdframework.dev"><img src="https://img.shields.io/badge/IVD-intent--verified-purple?style=flat-square" alt="IVD"></a>
+  <a href="https://trust.complyedge.io/cairn" rel="noopener noreferrer">
+    <img src="https://api.complyedge.io/v1/public/badge/cairn.svg" alt="ComplyEdge Enforcement Seal" height="26" />
+  </a>
 </p>
 
 ---

@@ -12,11 +12,16 @@ byte-stable; the single LLM call at the end gets a grounded prompt.
 
 The `call_llm` below is a stand-in that PRINTS the exact prompt a real client
 would send (swap the body for anthropic/openai — that is the whole change).
+That one call is wrapped by ComplyEdge (examples/complyedge_guard.py): the
+prompt is checked before it is sent and the answer before it is returned; a
+blocked check stops the step and reports the rule IDs.
 
 Run:  .venv/bin/python examples/agent_integration.py
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable
 
 from cairn_engine import Entity, InMemoryAliasTable, InMemoryGraph, Ref, Relation, resolve, traverse
 
@@ -70,7 +75,7 @@ def call_llm(prompt: str) -> str:
     return "<LLM answer would be generated from the grounded prompt above>"
 
 
-def agent_answer(question: str) -> str:
+def agent_answer(question: str, llm: Callable[[str], str] = call_llm) -> str:
     """The agent loop: Cairn first (deterministic), LLM last (one call)."""
     print(f"\nUSER QUESTION: {question!r}")
 
@@ -82,7 +87,7 @@ def agent_answer(question: str) -> str:
         # closed world: no known entities -> nothing to ground; the agent may
         # answer from parametric knowledge (no context injected, no guessing)
         print("cairn: no known entities — answering without retrieval")
-        return call_llm(f"Answer from general knowledge:\n\n{question}")
+        return llm(f"Answer from general knowledge:\n\n{question}")
 
     # 2) WHAT is connected? — bounded traversal, hop-scored refs
     seen: dict[str, float] = {}
@@ -104,9 +109,16 @@ def agent_answer(question: str) -> str:
         f"## Context (resolved deterministically by cairn)\n{context}\n\n"
         f"## Question\n{question}"
     )
-    return call_llm(prompt)
+    return llm(prompt)
 
 
 if __name__ == "__main__":
-    agent_answer("How does the retry policy affect my Schwab account?")
-    agent_answer("What is the capital of France?")
+    from complyedge_guard import ComplianceBlocked, guard
+
+    guarded_llm = guard(call_llm)
+    for q in ("How does the retry policy affect my Schwab account?",
+              "What is the capital of France?"):
+        try:
+            agent_answer(q, llm=guarded_llm)
+        except ComplianceBlocked as blocked:
+            print(f"BLOCKED ({blocked.direction}) by ComplyEdge rules: {blocked.rule_ids}")
