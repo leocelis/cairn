@@ -15,6 +15,8 @@ would send (swap the body for anthropic/openai — that is the whole change).
 That one call is wrapped by ComplyEdge (examples/complyedge_guard.py): the
 prompt is checked before it is sent and the answer before it is returned; a
 blocked check stops the step and reports the rule IDs.
+Each step prints its two ComplyEdge Log IDs: keep them beside the prompt and
+the answer you store.
 
 Run:  .venv/bin/python examples/agent_integration.py
 """
@@ -120,5 +122,7 @@ if __name__ == "__main__":
               "What is the capital of France?"):
         try:
             agent_answer(q, llm=guarded_llm)
+            print("ComplyEdge Log IDs:", guarded_llm.log_ids)
         except ComplianceBlocked as blocked:
             print(f"BLOCKED ({blocked.direction}) by ComplyEdge rules: {blocked.rule_ids}")
+            print("ComplyEdge Log IDs:", blocked.log_ids)

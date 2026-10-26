@@ -16,6 +16,8 @@
   </a>
 </p>
 
+<p align="center"><sub>Cairn itself makes no AI calls. The ComplyEdge seal counts the checks made by the example agent in <a href="examples/complyedge_guard.py"><code>examples/complyedge_guard.py</code></a>, which guards that agent's one LLM call.</sub></p>
+
 ---
 
 ## What is Cairn?

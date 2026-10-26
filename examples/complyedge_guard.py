@@ -6,6 +6,16 @@ before it is sent (direction="prompt") and the model's answer before it is
 returned (direction="output"). A blocked check stops that step — the blocked
 text is never sent or returned — and raises with the rule IDs that fired.
 
+Log IDs: ComplyEdge keeps a keyed fingerprint of each checked text, never the
+text, so a Log ID (event_id) proves something only next to your own copy of
+that text. After each call `guarded.log_ids` holds
+{"input_event_id": <prompt check>, "output_event_id": <answer check>}, and a
+ComplianceBlocked carries the same dict. Store them beside the prompt and the
+answer you keep.
+
+Attribution: every check carries the agent session (one id per guard) and the
+role; pass user_id for the end user, a pseudonymous id, never an email.
+
 The API key is read only from the COMPLYEDGE_API_KEY environment variable.
 `load_dotenv()` fills it from the repo-root `.env` (gitignored) when it is not
 already set in the shell; stdlib only, existing env vars always win.
@@ -14,8 +24,10 @@ already set in the shell; stdlib only, existing env vars always win.
 from __future__ import annotations
 
 import os
+import uuid
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from complyedge import ComplyEdge
 
@@ -52,26 +64,45 @@ def client() -> ComplyEdge:
 class ComplianceBlocked(Exception):
     """A ComplyEdge check returned allowed=False; the text was not used."""
 
-    def __init__(self, direction: str, rule_ids: list[str]) -> None:
+    def __init__(self, direction: str, rule_ids: list[str], log_ids: dict[str, str | None]) -> None:
         self.direction = direction
         self.rule_ids = rule_ids
+        self.log_ids = log_ids
         super().__init__(f"ComplyEdge blocked the {direction}: {', '.join(rule_ids)}")
 
 
-def _enforce(ce: ComplyEdge, text: str, direction: str) -> None:
-    result = ce.check(text, direction=direction)
-    if not result.allowed:
-        raise ComplianceBlocked(direction, [v.rule_id for v in result.violations])
+def guard(
+    llm: Callable[[str], str],
+    ce: ComplyEdge | None = None,
+    *,
+    session_id: str | None = None,
+    user_role: str = "agent",
+    user_id: str | None = None,
+) -> Any:
+    """Wrap an `llm(prompt) -> answer` callable with prompt + output checks.
 
-
-def guard(llm: Callable[[str], str], ce: ComplyEdge | None = None) -> Callable[[str], str]:
-    """Wrap an `llm(prompt) -> answer` callable with prompt + output checks."""
+    The returned callable keeps the last call's Log IDs on `.log_ids`.
+    """
     ce = ce or client()
+    attribution = {
+        "session_id": session_id or f"cairn-example-{uuid.uuid4()}",
+        "user_role": user_role,
+        "user_id": user_id,
+    }
+
+    def _enforce(text: str, direction: str, log_ids: dict[str, str | None]) -> None:
+        result = ce.check(text, direction=direction, **attribution)
+        log_ids["input_event_id" if direction == "prompt" else "output_event_id"] = result.event_id
+        if not result.allowed:
+            raise ComplianceBlocked(direction, [v.rule_id for v in result.violations], log_ids)
 
     def guarded(prompt: str) -> str:
-        _enforce(ce, prompt, "prompt")   # before the prompt reaches the model
+        log_ids: dict[str, str | None] = {"input_event_id": None, "output_event_id": None}
+        guarded.log_ids = log_ids  # type: ignore[attr-defined]
+        _enforce(prompt, "prompt", log_ids)   # before the prompt reaches the model
         answer = llm(prompt)
-        _enforce(ce, answer, "output")   # before the answer reaches the user
+        _enforce(answer, "output", log_ids)   # before the answer reaches the user
         return answer
 
+    guarded.log_ids = {"input_event_id": None, "output_event_id": None}  # type: ignore[attr-defined]
     return guarded
