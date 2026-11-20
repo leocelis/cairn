@@ -21,7 +21,7 @@ system); reverse is one-to-one (each system id belongs to exactly one canonical
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from cairn_engine.entity.model import Entity
 
@@ -43,7 +43,7 @@ class CrossSystemIndex:
     # -- build time ------------------------------------------------------
 
     @classmethod
-    def from_entries(cls, entries: Iterable[tuple[str, str, str]]) -> "CrossSystemIndex":
+    def from_entries(cls, entries: Iterable[tuple[str, str, str]]) -> CrossSystemIndex:
         """Build from an iterable of (canonical_id, system, external_id) triples."""
         index = cls()
         for canonical_id, system, external_id in entries:
@@ -51,7 +51,7 @@ class CrossSystemIndex:
         return index.freeze()
 
     @classmethod
-    def from_entities(cls, entities: Iterable[Entity]) -> "CrossSystemIndex":
+    def from_entities(cls, entities: Iterable[Entity]) -> CrossSystemIndex:
         """Build from entities carrying metadata['system_ids'] = {system: id | [ids]}."""
         index = cls()
         for entity in entities:
@@ -84,7 +84,7 @@ class CrossSystemIndex:
             for external_id in ids:
                 self.add(entity.canonical_id, system=str(system), external_id=str(external_id))
 
-    def freeze(self) -> "CrossSystemIndex":
+    def freeze(self) -> CrossSystemIndex:
         self._frozen = True
         return self
 

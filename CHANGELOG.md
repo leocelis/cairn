@@ -6,6 +6,20 @@ Versioning: [SemVer](https://semver.org/) per package.
 
 ## [Unreleased]
 
+### CI back to green (2026-11-20)
+
+- CI had failed on every push since 2026-08-20: `ruff>=0.5` resolved to a newer ruff
+  whose added rules reported 115 errors, so lint stopped the job before the tests ran.
+  `ruff` and `mypy` are now pinned (`ruff==0.17.2`, `mypy==2.4.0`) in
+  `requirements-dev.txt` and the dev dependency group.
+- Fixed the findings: import order and modern typing imports, unquoted annotations,
+  sorted `__all__`, unused unpacked names, parenthesized implicit string concatenation,
+  example scripts marked executable, a test now asserts the exact `RuntimeError` a frozen
+  table raises, and a mutable default argument in an example. No behaviour change; the
+  stopword set is byte-identical.
+- README: test count is 134; the install line notes that the PyPI package named `cairn`
+  is an unrelated project; the examples note names the ComplyEdge examples' requirements.
+
 ### Repo hygiene (2026-07-19)
 
 - Removed `examples/graph.svg` from the repo. It was a generated demo artifact

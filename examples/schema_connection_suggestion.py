@@ -19,11 +19,13 @@ Run:  .venv/bin/python examples/schema_connection_suggestion.py
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from cairn_engine import Entity, Relation
 from cairn_retrieval import suggest_connections
 
 
-def _tbl(name: str, concepts: list[str], links: list[str] = []) -> Entity:
+def _tbl(name: str, concepts: list[str], links: Sequence[str] = ()) -> Entity:
     rels = [Relation("has_column", f"concept::{c}") for c in concepts]
     rels += [Relation("relates_to", f"table::{t}") for t in links]  # entity-entity edges
     return Entity(canonical_id=f"table::{name}", label=name,

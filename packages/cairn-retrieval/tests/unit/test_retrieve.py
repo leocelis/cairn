@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import math
 import pathlib
-from typing import Sequence
+from collections.abc import Sequence
 
 from cairn_engine import Entity, InMemoryAliasTable, InMemoryGraph, Ref, Relation
 from cairn_retrieval.lexical import LexicalIndex
@@ -62,15 +62,15 @@ class _CountingEmbedder:
 def _engine(**over: object) -> tuple[RetrievalEngine, _CountingEmbedder]:
     embedder = _CountingEmbedder()
     texts = {k: v.content for k, v in _CORPUS.items()}
-    kwargs: dict[str, object] = dict(
-        table=InMemoryAliasTable.from_entities(_entities()),
-        corpus=_CORPUS,
-        graph=InMemoryGraph.from_entities(_entities()),
-        lexical=LexicalIndex.from_documents(texts),
-        semantic=SemanticIndex.from_documents(texts, embedder=embedder),
-        embedder=embedder,
-        semantic_floor=0.0,  # so the semantic signal always contributes in tests
-    )
+    kwargs: dict[str, object] = {
+        "table": InMemoryAliasTable.from_entities(_entities()),
+        "corpus": _CORPUS,
+        "graph": InMemoryGraph.from_entities(_entities()),
+        "lexical": LexicalIndex.from_documents(texts),
+        "semantic": SemanticIndex.from_documents(texts, embedder=embedder),
+        "embedder": embedder,
+        "semantic_floor": 0.0,  # so the semantic signal always contributes in tests
+    }
     kwargs.update(over)
     embedder.calls.clear()  # ignore build-time embedding; count only retrieve()
     return RetrievalEngine(**kwargs), embedder  # type: ignore[arg-type]

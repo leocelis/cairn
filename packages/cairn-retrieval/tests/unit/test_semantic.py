@@ -7,10 +7,9 @@ deterministic embedder stands in for the caller's model. Stdlib-only.
 from __future__ import annotations
 
 import pathlib
-from typing import Sequence
+from collections.abc import Sequence
 
 import pytest
-
 from cairn_retrieval.semantic import SemanticIndex
 
 _SRC = pathlib.Path(__file__).parents[3] / "cairn-retrieval" / "src" / "cairn_retrieval"

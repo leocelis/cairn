@@ -13,9 +13,9 @@ traverse() agree on ids after any merge.
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
-from cairn_engine.adapters._build import build_indexes, fold_entities, find_root
+from cairn_engine.adapters._build import build_indexes, find_root, fold_entities
 from cairn_engine.entity.model import Entity, Ref, Relation, ResolvedEntity
 from cairn_engine.entity.normalize import normalize
 
@@ -39,7 +39,7 @@ class InMemoryAliasTable:
         self._norm_entries: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
     @classmethod
-    def from_entities(cls, entities: Iterable[Entity]) -> "InMemoryAliasTable":
+    def from_entities(cls, entities: Iterable[Entity]) -> InMemoryAliasTable:
         """Convenience: build and freeze in one step."""
         table = cls()
         for entity in entities:
@@ -71,7 +71,7 @@ class InMemoryAliasTable:
     def _find(self, canonical_id: str) -> str:
         return find_root(canonical_id, self._merged)
 
-    def freeze(self) -> "InMemoryAliasTable":
+    def freeze(self) -> InMemoryAliasTable:
         """Fold merged classes into their representatives, then index — the
         folding + indexing is the shared adapters._build logic (identical across
         every backend)."""
@@ -144,7 +144,7 @@ class InMemoryGraph:
         self._edge_capable = False
 
     @classmethod
-    def from_entities(cls, entities: Iterable[Entity]) -> "InMemoryGraph":
+    def from_entities(cls, entities: Iterable[Entity]) -> InMemoryGraph:
         """Convenience: build and freeze in one step."""
         graph = cls()
         for entity in entities:
@@ -158,7 +158,7 @@ class InMemoryGraph:
             raise ValueError(f"duplicate canonical_id: {entity.canonical_id}")
         self._entities[entity.canonical_id] = entity
 
-    def freeze(self) -> "InMemoryGraph":
+    def freeze(self) -> InMemoryGraph:
         for cid in sorted(self._entities):
             ent = self._entities[cid]
             self._edges[cid] = tuple(sorted(ent.relations, key=lambda r: (r.predicate, r.target_id)))

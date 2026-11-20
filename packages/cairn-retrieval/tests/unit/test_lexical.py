@@ -10,7 +10,6 @@ import math
 import pathlib
 
 import pytest
-
 from cairn_retrieval.lexical import LexicalIndex, ScanMatch, scan
 
 _SRC = pathlib.Path(__file__).parents[3] / "cairn-retrieval" / "src" / "cairn_retrieval"

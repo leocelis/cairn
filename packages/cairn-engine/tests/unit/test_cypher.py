@@ -8,10 +8,9 @@ graph via an independent BFS — the differential oracle. Stdlib-only, no driver
 from __future__ import annotations
 
 import pathlib
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
 
 import pytest
-
 from cairn_engine.adapters.cypher import CypherRunFn, compile_traversal, traverse_cypher
 from cairn_engine.adapters.memory import InMemoryGraph
 from cairn_engine.entity.bitemporal import _within

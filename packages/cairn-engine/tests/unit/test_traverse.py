@@ -8,7 +8,6 @@ from __future__ import annotations
 import socket
 
 import pytest
-
 from cairn_engine.adapters.memory import InMemoryGraph
 from cairn_engine.entity.model import Entity, Ref, Relation
 from cairn_engine.entity.traverse import traverse

@@ -22,8 +22,8 @@ only the executor changed.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Callable, Iterable, Mapping
 
 from cairn_engine.entity.model import Ref
 from cairn_engine.entity.traverse import TraversalHit, TraversalResult

@@ -140,7 +140,7 @@ def build() -> tuple[list[dict], list[Entity], SqliteAliasTable, InMemoryGraph]:
 
 
 def main() -> None:
-    posts, entities, table, graph = build()
+    posts, entities, table, _graph = build()
     title = {e.canonical_id: e.label for e in entities}
 
     # authority post per concept = the post with the highest TF for it

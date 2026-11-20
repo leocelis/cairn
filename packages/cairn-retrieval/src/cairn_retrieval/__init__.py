@@ -25,7 +25,7 @@ from cairn_retrieval.assembler import (
     ManifestEntry,
     assemble,
 )
-from cairn_retrieval.retrieve import DocMeta, RetrievalEngine, RetrievalResult
+from cairn_retrieval.connections import ConnectionSuggestion, suggest_connections
 from cairn_retrieval.fusion import FusedHit, fuse
 from cairn_retrieval.gate import (
     DEFAULT_GATE,
@@ -35,22 +35,22 @@ from cairn_retrieval.gate import (
     gate,
 )
 from cairn_retrieval.lexical import LexicalHit, LexicalIndex, ScanMatch, scan
-from cairn_retrieval.semantic import SemanticHit, SemanticIndex
 from cairn_retrieval.link_ranking import (
     LinkRecommendation,
     concept_idf,
     rank_links,
     tfidf_vectors,
 )
-from cairn_retrieval.connections import ConnectionSuggestion, suggest_connections
+from cairn_retrieval.retrieve import DocMeta, RetrievalEngine, RetrievalResult
+from cairn_retrieval.semantic import SemanticHit, SemanticIndex
 
 __version__ = "0.1.0"
 
 __all__ = [
+    "DEFAULT_GATE",
     "AssembledContext",
     "Candidate",
     "ConnectionSuggestion",
-    "DEFAULT_GATE",
     "DocMeta",
     "FusedHit",
     "GateConfig",

@@ -7,8 +7,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
-
 CAIRN_ROOT = Path(__file__).resolve().parents[4]
 SCORECARD_PATH = CAIRN_ROOT / "benchmarks" / "architecture_class" / "scorecard.py"
 

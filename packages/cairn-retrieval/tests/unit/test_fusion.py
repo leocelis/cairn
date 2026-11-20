@@ -10,7 +10,6 @@ import inspect
 import pathlib
 
 import pytest
-
 from cairn_retrieval.fusion import fuse
 
 _SRC = pathlib.Path(__file__).parents[3] / "cairn-retrieval" / "src" / "cairn_retrieval"

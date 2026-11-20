@@ -23,18 +23,18 @@ from cairn_engine.entity.traverse import traverse
 POSTS = {
     "post::decision_layer": (
         "The Decision Layer",
-        "Most teams automate labor. The real shift is entity resolution applied "
-        "to decisions — the decision layer sits above the tools.",
+        ("Most teams automate labor. The real shift is entity resolution applied "
+        "to decisions — the decision layer sits above the tools."),
     ),
     "post::entity_resolution_101": (
         "Entity Resolution 101",
-        "Entity resolution maps messy references to canonical identity. It is "
-        "the foundation under any world model.",
+        ("Entity resolution maps messy references to canonical identity. It is "
+        "the foundation under any world model."),
     ),
     "post::world_models": (
         "World Models for Agents",
-        "A world model is a map of entities and relations. Retrieval without "
-        "it is guessing.",
+        ("A world model is a map of entities and relations. Retrieval without "
+        "it is guessing."),
     ),
 }
 

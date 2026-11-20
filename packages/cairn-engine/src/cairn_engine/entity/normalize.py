@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 import unicodedata
 
-__all__ = ["normalize", "tokenize", "shannon_entropy_bits"]
+__all__ = ["normalize", "shannon_entropy_bits", "tokenize"]
 
 
 def normalize(text: str) -> str:

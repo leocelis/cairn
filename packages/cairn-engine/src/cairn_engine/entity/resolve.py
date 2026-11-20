@@ -29,9 +29,10 @@ could mint). Recorded in the intent changelog.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from cairn_engine.adapters.base import AliasTableAdapter
 from cairn_engine.entity.model import ResolvedEntity
@@ -61,12 +62,12 @@ class ResolverConfig:
     fuzzy_threshold: float = 0.85         # inclusive
     entropy_min_bits: float = 1.5         # Graphiti entropy-gate pattern
     enable_fuzzy: bool = True
-    arbiter: "ArbiterFn | None" = None    # Tier 4, opt-in; None = default LLM-free path
+    arbiter: ArbiterFn | None = None    # Tier 4, opt-in; None = default LLM-free path
     arbiter_band: tuple[float, float] = (0.70, 0.85)  # the ambiguous band Tier 4 judges
     # Tier 3, opt-in: precomputed alias-embedding index + the caller's embedder
     # for the mention. Both None on the default path (zero network, zero models).
-    semantic_index: "EmbeddingIndex | None" = None
-    embedder: "EmbedderFn | None" = None
+    semantic_index: EmbeddingIndex | None = None
+    embedder: EmbedderFn | None = None
     semantic_threshold: float = 0.85      # inclusive, mirrors fuzzy_threshold
 
 
@@ -242,7 +243,7 @@ def _scan(query: str, table: AliasTableAdapter) -> list[ResolvedEntity]:
     covered = [False] * len(q_tokens)
     matches: list[tuple[int, str, tuple[str, ...]]] = []  # (start, alias_norm, ids)
     for length in range(max_gram, 0, -1):  # longest-match-first
-        for start in range(0, len(q_tokens) - length + 1):  # then leftmost
+        for start in range(len(q_tokens) - length + 1):  # then leftmost
             if any(covered[start : start + length]):
                 continue
             gram = " ".join(q_tokens[start : start + length])

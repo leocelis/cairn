@@ -20,8 +20,8 @@ Boundaries (consistent with the rest of the engine):
 from __future__ import annotations
 
 import math
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Callable, Sequence
 
 __all__ = ["EmbedderFn", "EmbeddingIndex", "cosine"]
 
@@ -59,7 +59,7 @@ class EmbeddingIndex:
         cls,
         normalized_entries: Sequence[tuple[str, tuple[str, ...]]],
         embedder: EmbedderFn,
-    ) -> "EmbeddingIndex":
+    ) -> EmbeddingIndex:
         """BUILD TIME: embed every normalized alias exactly once (one batch call).
 
         `normalized_entries` is `AliasTableAdapter.normalized_entries()` — the

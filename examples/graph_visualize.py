@@ -83,7 +83,7 @@ def layout(nodes: list[str], edges: list[tuple[str, str]]) -> dict[str, list[flo
 
 
 def build_svg() -> str:
-    posts, table, graph = build()
+    _posts, table, _graph = build()
     entities = {e.canonical_id: e for e in table.canonical_entities()}
 
     # undirected edge set (mentions / mentioned_in collapse to one line)
@@ -101,18 +101,18 @@ def build_svg() -> str:
     pos = layout(node_ids, edges)  # type: ignore[arg-type]
 
     svg = [
-        f'<svg width="{W}" height="{H}" viewBox="0 0 {W} {H}" '
-        'xmlns="http://www.w3.org/2000/svg" font-family="system-ui, sans-serif">',
+        (f'<svg width="{W}" height="{H}" viewBox="0 0 {W} {H}" '
+        'xmlns="http://www.w3.org/2000/svg" font-family="system-ui, sans-serif">'),
         f'<rect width="{W}" height="{H}" fill="white"/>',
-        f'<text x="{W/2}" y="34" text-anchor="middle" font-size="20" font-weight="600" '
-        'fill="#222">Cairn entity graph — concepts &amp; posts as one network</text>',
-        f'<text x="{W/2}" y="54" text-anchor="middle" font-size="13" fill="#666">'
+        (f'<text x="{W/2}" y="34" text-anchor="middle" font-size="20" font-weight="600" '
+        'fill="#222">Cairn entity graph — concepts &amp; posts as one network</text>'),
+        (f'<text x="{W/2}" y="54" text-anchor="middle" font-size="13" fill="#666">'
         'every node is an entity; lines are "mentions" edges — concepts cluster '
-        'with the posts that discuss them</text>',
-        f'<circle cx="40" cy="78" r="7" fill="{CONCEPT_FILL}"/>'
-        f'<text x="54" y="82" font-size="12" fill="#444">concept</text>',
-        f'<rect x="132" y="71" width="14" height="14" rx="2" fill="{POST_FILL}"/>'
-        f'<text x="152" y="82" font-size="12" fill="#444">blog post</text>',
+        'with the posts that discuss them</text>'),
+        (f'<circle cx="40" cy="78" r="7" fill="{CONCEPT_FILL}"/>'
+        f'<text x="54" y="82" font-size="12" fill="#444">concept</text>'),
+        (f'<rect x="132" y="71" width="14" height="14" rx="2" fill="{POST_FILL}"/>'
+        f'<text x="152" y="82" font-size="12" fill="#444">blog post</text>'),
     ]
 
     for a, b in edges:                            # edges under nodes

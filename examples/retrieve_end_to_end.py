@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from typing import Sequence
+from collections.abc import Sequence
 
 from cairn_engine import Entity, InMemoryAliasTable, InMemoryGraph, Ref, Relation
 from cairn_retrieval import DocMeta, LexicalIndex, RetrievalEngine, SemanticIndex

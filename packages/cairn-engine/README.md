@@ -16,7 +16,7 @@ package, which depends on this one.
 
 > **Status:** feature-complete, pre-release (0.1.0) — full resolution cascade,
 > bounded bi-temporal traversal, ontology authoring + 3-tier dedup, SQLite and
-> openCypher adapters, and a cross-system entity index. 120 tests, ruff + mypy
+> openCypher adapters, and a cross-system entity index. 134 tests, ruff + mypy
 > strict, byte-stable. The retrieval-quality benchmark (OP-31) is the next phase;
 > until then, treat determinism/portability as proven and quality as unclaimed.
 > See the [roadmap](https://github.com/leocelis/cairn/blob/main/ROADMAP.md).

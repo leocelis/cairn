@@ -24,12 +24,12 @@ the entity engine's traverse(), which does only structural bounded closure
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from cairn_engine import Entity
 
-__all__ = ["LinkRecommendation", "concept_idf", "tfidf_vectors", "rank_links"]
+__all__ = ["LinkRecommendation", "concept_idf", "rank_links", "tfidf_vectors"]
 
 
 @dataclass(frozen=True, slots=True)

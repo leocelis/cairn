@@ -8,12 +8,12 @@ guarantee, made concrete: one folding algorithm, N storage backends.
 from __future__ import annotations
 
 import dataclasses
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 from cairn_engine.entity.model import Entity, Ref, Relation
 from cairn_engine.entity.normalize import normalize
 
-__all__ = ["find_root", "fold_entities", "build_indexes"]
+__all__ = ["build_indexes", "find_root", "fold_entities"]
 
 
 def find_root(canonical_id: str, merged: Mapping[str, str]) -> str:

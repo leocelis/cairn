@@ -20,10 +20,10 @@ built at ontology-authoring time (OP-35). The gate invents nothing.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Iterable, Mapping
 
-__all__ = ["GateConfig", "RoutingDecision", "DEFAULT_GATE", "complexity", "gate"]
+__all__ = ["DEFAULT_GATE", "GateConfig", "RoutingDecision", "complexity", "gate"]
 
 # strategy tiers (OP-25 / OP-33), cheapest first — also the tie-break order
 _TIERS = ("none", "grep", "semantic", "graph", "composite")

@@ -14,8 +14,8 @@ semantic OP-3, graph OP-34, fusion OP-32, assembler OP-29/FF-11).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from cairn_engine import (
     AliasTableAdapter,
@@ -24,6 +24,7 @@ from cairn_engine import (
     resolve,
     traverse,
 )
+
 from cairn_retrieval.assembler import AssembledContext, Candidate, assemble
 from cairn_retrieval.fusion import FusedHit, fuse
 from cairn_retrieval.gate import DEFAULT_GATE, GateConfig, RoutingDecision, gate

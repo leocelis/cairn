@@ -27,7 +27,16 @@ from __future__ import annotations
 import json
 import pathlib
 
-from cairn_engine import Entity, InMemoryAliasTable, InMemoryGraph, Ref, Relation, resolve, traverse, with_mirror_edges
+from cairn_engine import (
+    Entity,
+    InMemoryAliasTable,
+    InMemoryGraph,
+    Ref,
+    Relation,
+    resolve,
+    traverse,
+    with_mirror_edges,
+)
 from cairn_engine.entity.normalize import normalize, tokenize
 
 CORPUS = pathlib.Path(__file__).parent.parent / "corpus" / "blog" / "posts.json"

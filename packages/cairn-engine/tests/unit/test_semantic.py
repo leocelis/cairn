@@ -72,7 +72,7 @@ def test_aliases_embedded_once_at_build() -> None:
 # -- constraint: embedder_is_caller_supplied_never_default -----------------------
 
 def test_default_path_untouched() -> None:
-    table, index, embedder = _setup()
+    table, _index, embedder = _setup()
     calls_after_build = len(embedder.calls)
     # default config: tier 3 off -> semantic miss, embedder never consulted
     _, missed = resolve("", table=table, mentions=["my red car"])
@@ -115,8 +115,9 @@ def test_thresholds_and_cascade_order() -> None:
     assert missed2 == ["the weather in tokyo"]
 
     # F10: exact-0.85 boundary pin — cos((1,0),(0.85,0.526783)) == 0.85 accepts (inclusive)
-    from cairn_engine.entity.semantic import cosine as _cos
     import math
+
+    from cairn_engine.entity.semantic import cosine as _cos
     v = (0.85, math.sqrt(1 - 0.85 * 0.85))
     assert abs(_cos((1.0, 0.0), v) - 0.85) < 1e-12
 
@@ -146,7 +147,7 @@ def test_joint_semantic_tier() -> None:
     build_calls = len(embedder.calls)                        # C1: one build batch
     cfg = ResolverConfig(semantic_index=index, embedder=embedder)
     out = resolve("", table=table, mentions=["my red car"], config=cfg)
-    resolved, unresolved = out
+    resolved, _unresolved = out
     assert resolved[0].tier == "embedding"                   # C3 threshold accept
     assert table.has_id(resolved[0].canonical_id)            # C4 closed world
     assert len(embedder.calls) == build_calls + 1            # C1 mention-only embed

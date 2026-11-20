@@ -16,6 +16,7 @@ an unknown seed returns an empty result — nothing is ever fabricated.
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 from cairn_engine.adapters.base import GraphAdapter
 from cairn_engine.entity.bitemporal import _within
 from cairn_engine.entity.model import Ref, Relation

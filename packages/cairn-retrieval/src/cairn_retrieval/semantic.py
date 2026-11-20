@@ -13,8 +13,8 @@ embeds only the query. Feeds RRF fusion (M3.4).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from cairn_engine import EmbedderFn, cosine
 
@@ -39,7 +39,7 @@ class SemanticIndex:
     @classmethod
     def from_documents(
         cls, documents: Mapping[str, str], *, embedder: EmbedderFn
-    ) -> "SemanticIndex":
+    ) -> SemanticIndex:
         index = cls()
         doc_ids = list(documents)  # preserve caller order for the batch
         if doc_ids:

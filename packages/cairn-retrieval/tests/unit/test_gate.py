@@ -9,7 +9,6 @@ from __future__ import annotations
 import pathlib
 
 import pytest
-
 from cairn_retrieval.gate import complexity, gate
 
 _SRC = pathlib.Path(__file__).parents[3] / "cairn-retrieval" / "src" / "cairn_retrieval"
@@ -78,7 +77,7 @@ def test_no_llm_byte_stable() -> None:
                    "import httpx", "import time", "import datetime", "from datetime"):
         assert banned not in src, f"gate must stay LLM/clock-free: {banned!r}"
 
-    args = dict(entities=["geo::france"], tail_ids=frozenset({"geo::france"}))
+    args = {"entities": ["geo::france"], "tail_ids": frozenset({"geo::france"})}
     assert gate("capital of France", **args) == gate("capital of France", **args)
 
 

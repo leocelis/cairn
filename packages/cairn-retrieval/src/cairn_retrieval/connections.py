@@ -29,10 +29,11 @@ intents/connection_suggestion_intent.yaml and OP-36.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from cairn_engine import Entity
+
 from cairn_retrieval.link_ranking import _cosine, concept_idf, tfidf_vectors
 
 __all__ = ["ConnectionSuggestion", "suggest_connections"]

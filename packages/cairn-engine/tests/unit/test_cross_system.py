@@ -9,7 +9,6 @@ from __future__ import annotations
 import pathlib
 
 import pytest
-
 from cairn_engine.entity.crosssystem import CrossSystemIndex
 from cairn_engine.entity.model import Entity
 

@@ -7,9 +7,8 @@ core/entity module intent as each milestone lands.
 
 import dataclasses
 
-import pytest
-
 import cairn_engine
+import pytest
 from cairn_engine.adapters import AliasTableAdapter, GraphAdapter
 from cairn_engine.entity import ontology, resolve, traverse
 from cairn_engine.entity.model import Entity, Ref, Relation, ResolvedEntity

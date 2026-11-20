@@ -24,8 +24,9 @@ frozen Entity/Relation; a "change" produces new versions and keeps the old ones.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import replace
-from typing import Any, Iterable, Protocol, TypeVar, cast, runtime_checkable
+from typing import Any, Protocol, TypeVar, cast, runtime_checkable
 
 __all__ = ["as_at", "supersede"]
 

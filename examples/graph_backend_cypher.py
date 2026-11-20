@@ -16,7 +16,7 @@ Run:  .venv/bin/python examples/graph_backend_cypher.py
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
 
 from cairn_engine import (
     Entity,
@@ -46,7 +46,7 @@ def build() -> InMemoryGraph:
     ])
 
 
-def in_memory_run(graph: InMemoryGraph, *, depth: int) -> "object":
+def in_memory_run(graph: InMemoryGraph, *, depth: int) -> object:
     """A stand-in graph backend: answers the compiled query from `graph`.
 
     A production deployment replaces this with `neo4j_run` (bottom of file) —
@@ -99,7 +99,7 @@ def main() -> None:
 
 
 # --- what a real Neo4j deployment passes as `run` (kept out of the demo path) ---
-def neo4j_run(session: "object"):  # pragma: no cover - illustrative only
+def neo4j_run(session: object):  # pragma: no cover - illustrative only
     """Adapt a neo4j driver session to cairn's run() callable.
 
         from neo4j import GraphDatabase

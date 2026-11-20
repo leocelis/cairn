@@ -19,8 +19,8 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Callable, Iterable, Sequence
 
 from cairn_engine.entity.model import Entity, Relation
 from cairn_engine.entity.normalize import normalize, shannon_entropy_bits
@@ -103,7 +103,7 @@ _CLAUSE_BREAK = frozenset(",.;:!?)”\"'")  # clause boundaries end a capitalize
 # function-word set — deliberately EXCLUDES nothing domain-specific (no "cloud",
 # "api", "check", "pick", "back", "right"…), so real concepts survive. Fixed and
 # documented -> still fully deterministic.
-_STOPWORDS = frozenset(
+_STOPWORD_TEXT = (
     "a about above after again against all also am an and another any anyone anything are around as "
     "ask at back be because been before being below between both but by can cannot could did do does "
     "doing done down during each either else enough ever every everyone everything few for from "
@@ -114,15 +114,15 @@ _STOPWORDS = frozenset(
     "something still such than that the their theirs them themselves then there therefore these they "
     "thing things this those though through thus to together too toward und until up upon us very was "
     "we well were what whatever when whenever where whether which while who whoever whom whose why "
-    "will with within without would yet you your yours yourself yourselves".split()
+    "will with within without would yet you your yours yourself yourselves"
 )
+_STOPWORDS = frozenset(_STOPWORD_TEXT.split())
 
 
 def _clean_token(word: str) -> str:
     word = word.strip(".,;:!?()[]{}«»\"'").rstrip("”").lstrip("“")
     for suffix in ("’s", "'s", "’", "'"):
-        if word.endswith(suffix):
-            word = word[: -len(suffix)]
+        word = word.removesuffix(suffix)
     return word
 
 

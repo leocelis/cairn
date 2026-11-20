@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 __all__ = ["LexicalHit", "LexicalIndex", "ScanMatch", "scan"]
 
@@ -64,7 +64,7 @@ class LexicalIndex:
     @classmethod
     def from_documents(
         cls, documents: Mapping[str, str], *, k1: float = 1.2, b: float = 0.75
-    ) -> "LexicalIndex":
+    ) -> LexicalIndex:
         index = cls(k1=k1, b=b)
         for doc_id, text in documents.items():
             index.add(doc_id, text)
@@ -77,7 +77,7 @@ class LexicalIndex:
             raise ValueError(f"duplicate doc_id: {doc_id}")
         self._docs[doc_id] = _tokenize(text)
 
-    def freeze(self) -> "LexicalIndex":
+    def freeze(self) -> LexicalIndex:
         for doc_id, tokens in self._docs.items():
             self._dl[doc_id] = len(tokens)
             tf: dict[str, int] = {}

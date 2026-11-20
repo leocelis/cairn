@@ -166,7 +166,7 @@ def run_pipeline(verbose: bool = True) -> str:
         ("quantum blockchain synergy", "unknown -> closed world"),
     ]
     for mention, label in cases:
-        resolved, unresolved = resolve("", table=table, mentions=[mention], config=cfg)
+        resolved, _unresolved = resolve("", table=table, mentions=[mention], config=cfg)
         if resolved:
             r = resolved[0]
             log(f"  [{label:34}] {mention!r} -> {r.canonical_id}  "

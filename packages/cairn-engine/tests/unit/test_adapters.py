@@ -7,7 +7,6 @@ Union-Find merge forwarding, and the from_entities conveniences.
 from __future__ import annotations
 
 import pytest
-
 from cairn_engine.adapters.memory import InMemoryAliasTable, InMemoryGraph
 from cairn_engine.entity.model import Entity
 

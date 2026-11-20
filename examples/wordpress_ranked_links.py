@@ -20,7 +20,7 @@ from wordpress_linking_demo import build
 
 
 def main() -> None:
-    posts, table, graph = build()
+    posts, table, _graph = build()
     entities = table.canonical_entities()
     title = {e.canonical_id: e.label for e in entities}
 

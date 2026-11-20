@@ -8,7 +8,6 @@ from __future__ import annotations
 import socket
 
 import pytest
-
 from cairn_engine.adapters.jsonfile import dump_entities, load_entities
 from cairn_engine.adapters.memory import InMemoryAliasTable
 from cairn_engine.entity.model import Entity, Ref, Relation
@@ -251,7 +250,6 @@ def test_metadata_json_fidelity_and_validation() -> None:
     """F6/F12: metadata contents survive round-trip; non-JSON-native values
     fail loudly at dump; frozen records can't be mutated through metadata."""
     import pytest as _pytest
-
     from cairn_engine.adapters.jsonfile import dump_entities, load_entities
 
     e = Entity(canonical_id="c::m", label="m", entity_type="concept",

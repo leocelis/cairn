@@ -26,7 +26,7 @@ A **cairn** is a stack of stones left by travelers, marking the way for those wh
 
 Cairn is a **storage-agnostic routing and composition layer**, not a database. It orchestrates retrieval over stores you already have (files, SQL, vector DB, graph DB). It does **not** own storage, run LLM ingestion on the hot path, or dump an index into the prompt.
 
-**Status:** `cairn-engine` and `cairn-retrieval` are **released on PyPI** (0.1.0) — feature-complete, 120 tests, ruff + mypy strict, zero runtime dependencies, byte-stable output. Next: the benchmark phase (eval vs. agentic-grep / vector-RAG / Graphiti) — quality claims stay honest until it lands. See [`ROADMAP.md`](ROADMAP.md).
+**Status:** `cairn-engine` and `cairn-retrieval` are **released on PyPI** (0.1.0) — feature-complete, 134 tests, ruff + mypy strict, zero runtime dependencies, byte-stable output. Next: the benchmark phase (eval vs. agentic-grep / vector-RAG / Graphiti) — quality claims stay honest until it lands. See [`ROADMAP.md`](ROADMAP.md).
 
 ## Why
 
@@ -58,13 +58,15 @@ Cairn separates what is **test-enforced today** from what still needs the benchm
 | Retrieval **quality** beats agentic-grep / vector-RAG / Graphiti at lower cost | ❌ **not yet measured** | Phase 4 (OP-31 eval) — the honest gap; "best" stays a thesis until then |
 | Scales to 100k+ entities | ⚠️ same API proven across backends; large-corpus performance unexercised | adapters exist; no scale benchmark yet |
 
-Full test suite: **120 tests, ruff + mypy strict, byte-stable**, green on 3.11–3.13.
+Full test suite: **134 tests, ruff + mypy strict, byte-stable**, green on 3.11–3.13.
 
 ## Quickstart
 
 ```bash
 pip install cairn-engine cairn-retrieval
 ```
+
+The PyPI package named `cairn` is an unrelated project; install `cairn-engine`.
 
 Or from source, for development:
 
@@ -114,7 +116,7 @@ result = engine.retrieve("how do acme and beta relate", budget=200)
 # A query the gate routes to "none" returns NO context — the skip is the point.
 ```
 
-Runnable demos for every subsystem live in [`examples/`](examples/) — all self-contained except the WordPress ones, which take your own corpus (see `examples/wordpress_corpus_prep.py`).
+Runnable demos for every subsystem live in [`examples/`](examples/) — all self-contained except the WordPress ones, which take your own corpus (see `examples/wordpress_corpus_prep.py`), and the ComplyEdge ones, which need the `complyedge` package and an API key.
 
 ## Design invariants (each test-enforced)
 

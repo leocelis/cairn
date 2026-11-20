@@ -14,12 +14,12 @@ orders, and emits from inputs the signals already produced.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from cairn_engine import cosine
 
-__all__ = ["Candidate", "ManifestEntry", "AssembledContext", "assemble"]
+__all__ = ["AssembledContext", "Candidate", "ManifestEntry", "assemble"]
 
 
 @dataclass(frozen=True, slots=True)

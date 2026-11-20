@@ -8,7 +8,6 @@ storage_agnostic_core proof.
 from __future__ import annotations
 
 import pytest
-
 from cairn_engine.adapters.base import AliasTableAdapter
 from cairn_engine.adapters.memory import InMemoryAliasTable
 from cairn_engine.adapters.sqlite import SqliteAliasTable
@@ -84,7 +83,7 @@ def test_persist_and_reopen(tmp_path) -> None:  # type: ignore[no-untyped-def]
     assert [h.canonical_id for h in reopened.lookup("LLMs")] == ["concept::llm"]
     assert reopened.canonical_entities()[0].canonical_id  # reads work
     # reopened is read-only
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError, match="frozen"):
         reopened.add(Entity(canonical_id="x::y", label="y", entity_type="concept"))
     with pytest.raises(ValueError):
         SqliteAliasTable.open(str(tmp_path / "not_a_db.db"))

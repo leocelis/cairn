@@ -17,9 +17,9 @@ scales via SQL.
 from __future__ import annotations
 
 import sqlite3
-from typing import Iterable
+from collections.abc import Iterable
 
-from cairn_engine.adapters._build import build_indexes, fold_entities, find_root
+from cairn_engine.adapters._build import build_indexes, find_root, fold_entities
 from cairn_engine.adapters.jsonfile import dump_entities, load_entities
 from cairn_engine.entity.model import Entity, ResolvedEntity
 
@@ -57,14 +57,14 @@ class SqliteAliasTable:
     # -- build time ------------------------------------------------------
 
     @classmethod
-    def from_entities(cls, entities: Iterable[Entity], *, path: str = ":memory:") -> "SqliteAliasTable":
+    def from_entities(cls, entities: Iterable[Entity], *, path: str = ":memory:") -> SqliteAliasTable:
         table = cls(path)
         for entity in entities:
             table.add(entity)
         return table.freeze()
 
     @classmethod
-    def open(cls, path: str) -> "SqliteAliasTable":
+    def open(cls, path: str) -> SqliteAliasTable:
         """Reopen an already-frozen .db read-only (no rebuild)."""
         table = cls.__new__(cls)
         table._path = path
@@ -97,7 +97,7 @@ class SqliteAliasTable:
         if root_src != root_dst:
             self._merged[root_src] = root_dst
 
-    def freeze(self) -> "SqliteAliasTable":
+    def freeze(self) -> SqliteAliasTable:
         """Fold in memory (shared _build), then persist the frozen result to SQL."""
         canonical = fold_entities(self._entities, self._merged)
         exact, norm = build_indexes(canonical)

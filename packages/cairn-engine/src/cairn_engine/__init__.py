@@ -36,7 +36,12 @@ OP-28/34/35) and docs/research/foundations/.
 """
 
 from cairn_engine.adapters.base import AliasTableAdapter, GraphAdapter
-from cairn_engine.adapters.cypher import CypherQuery, CypherRunFn, compile_traversal, traverse_cypher
+from cairn_engine.adapters.cypher import (
+    CypherQuery,
+    CypherRunFn,
+    compile_traversal,
+    traverse_cypher,
+)
 from cairn_engine.adapters.jsonfile import dump_entities, load_entities
 from cairn_engine.adapters.memory import InMemoryAliasTable, InMemoryGraph
 from cairn_engine.adapters.sqlite import SqliteAliasTable
@@ -72,11 +77,11 @@ __all__ = [
     "GraphAdapter",
     "InMemoryAliasTable",
     "InMemoryGraph",
-    "SqliteAliasTable",
     "Ref",
     "Relation",
     "ResolvedEntity",
     "ResolverConfig",
+    "SqliteAliasTable",
     "TraversalHit",
     "TraversalResult",
     "__version__",
