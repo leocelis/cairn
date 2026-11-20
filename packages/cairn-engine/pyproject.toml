@@ -1,7 +1,7 @@
 [project]
 name = "cairn-engine"
 version = "0.1.1"
-description = "Deterministic entity / world-model engine for AI agents — resolve messy references to canonical IDs, traverse relations, author the alias table. Storage-agnostic, local-first, zero generative-LLM on the hot path."
+description = "Deterministic entity resolution for AI agents: map every name an agent sees to the one stored ID, or to unresolved, with no LLM call. Bounded relation traversal, alias-table authoring, storage-agnostic, local-first, zero dependencies."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

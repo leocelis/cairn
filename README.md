@@ -1,6 +1,6 @@
 <p align="center">
   <strong>Cairn</strong><br>
-  <em>The deterministic entity / world-model engine for AI agents — resolve entities, decide whether to retrieve, route signals, assemble minimal context.</em>
+  <em>Deterministic entity resolution for AI agents: every name an agent sees maps to the one stored ID, or to "unresolved", with no LLM call. Then an LLM-free gate decides whether to retrieve, and only the minimal context is assembled.</em>
 </p>
 
 <p align="center">
@@ -40,7 +40,7 @@ Always-on retrieval measurably hurts (SRACG, AAAI 2026: −2.6 to −3.6pp vs. n
 
 | Package | What it is | State |
 |---------|-----------|-------|
-| **`cairn-engine`** | The deterministic **entity / world-model engine** — resolution cascade (exact → normalized → fuzzy → opt-in semantic → opt-in constrained LLM arbiter), bounded bi-temporal traversal, ontology authoring with a mandatory human gate, cross-system entity index, storage adapters. Pure stdlib, zero dependencies. | [released on PyPI](https://pypi.org/project/cairn-engine/) |
+| **`cairn-engine`** | The deterministic **entity resolution engine** — resolution cascade (exact → normalized → fuzzy → opt-in semantic → opt-in constrained LLM arbiter), bounded bi-temporal traversal, ontology authoring with a mandatory human gate, cross-system entity index, storage adapters. Pure stdlib, zero dependencies. | [released on PyPI](https://pypi.org/project/cairn-engine/) |
 | **`cairn-retrieval`** | The **agent-retrieval layer** on top — adaptive gate (OP-33), lexical BM25 + scan, opt-in semantic signal, RRF fusion, budgeted context assembler with trace manifest, and `retrieve()` end-to-end. Depends only on `cairn-engine`. | [released on PyPI](https://pypi.org/project/cairn-retrieval/), 0.x until benchmarked |
 
 ## What's proven — and what's not
@@ -139,7 +139,7 @@ cairn/
 ├── pyproject.toml                # uv workspace root
 ├── cairn_system_intent.yaml      # system charter (IVD intent format)
 ├── packages/
-│   ├── cairn-engine/             # entity / world-model engine  (import: cairn_engine)
+│   ├── cairn-engine/             # entity resolution engine     (import: cairn_engine)
 │   │   ├── src/cairn_engine/{entity,adapters}/
 │   │   ├── intents/              # module intents — constraints map 1:1 to tests
 │   │   └── tests/{unit,integration}/

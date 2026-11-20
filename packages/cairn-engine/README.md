@@ -1,6 +1,6 @@
 # cairn-engine
 
-**The deterministic entity / world-model engine for AI agents.** (The brand is
+**Deterministic entity resolution for AI agents.** (The brand is
 **Cairn**; the distribution is `cairn-engine` and the import package is
 `cairn_engine`.)
 
