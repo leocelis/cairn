@@ -14,7 +14,7 @@ default path**, **zero runtime dependencies** (pure stdlib).
 [`cairn-retrieval`](https://github.com/leocelis/cairn/tree/main/packages/cairn-retrieval)
 package, which depends on this one.
 
-> **Status:** feature-complete, pre-release (0.1.0) — full resolution cascade,
+> **Status:** feature-complete, released (0.1.0) — full resolution cascade,
 > bounded bi-temporal traversal, ontology authoring + 3-tier dedup, SQLite and
 > openCypher adapters, and a cross-system entity index. 134 tests, ruff + mypy
 > strict, byte-stable. The retrieval-quality benchmark (OP-31) is the next phase;

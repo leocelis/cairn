@@ -1,6 +1,6 @@
 # Cairn — Roadmap
 
-**Version:** 0.1.0 · **Date:** 2026-06-27 · **Status:** Living document
+**Version:** 0.1.0 · **Date:** 2026-11-20 · **Status:** Living document
 **Derived from:** `cairn_system_intent.yaml` v0.2.1 · `docs/PRD.md` · `docs/patterns/*.yaml`
 
 > Legend: ✅ done · 🚧 in progress · ⏳ planned · 💡 exploratory
@@ -42,7 +42,7 @@
 
 The deterministic, in-memory, local-first entity engine. Delivers PRD use cases **UC-1, UC-9, UC-10** and the foundation for UC-2/UC-11.
 
-**Status (2026-07-12):** M1.1–M1.6 ✅ done — full OP-28 cascade (exact→normalized→fuzzy→semantic→llm, last two opt-in via caller callables), bounded bitemporal traversal, build-time authoring + 3-tier dedup + Union-Find merge (whole-class forwarding), JSON serialization, conflict-audit gate, and the real-corpus WordPress use case. **60 tests at Phase-1 close (whole monorepo suite now 114), ruff + mypy strict clean, zero runtime deps, byte-stable.** Passed a fresh-eyes review (F1–F19 all closed). Runnable examples incl. a full e2e walkthrough, the agent-integration pattern, a deterministic graph visualizer, and the M1.6 internal-link deliverable — validated on the author's real 14-post blog corpus (gitignored; bring your own via `wordpress_corpus_prep.py`).
+**Status (2026-07-12):** M1.1–M1.6 ✅ done — full OP-28 cascade (exact→normalized→fuzzy→semantic→llm, last two opt-in via caller callables), bounded bitemporal traversal, build-time authoring + 3-tier dedup + Union-Find merge (whole-class forwarding), JSON serialization, conflict-audit gate, and the real-corpus WordPress use case. **60 tests at Phase-1 close (whole monorepo suite now 134), ruff + mypy strict clean, zero runtime deps, byte-stable.** Passed a fresh-eyes review (F1–F19 all closed). Runnable examples incl. a full e2e walkthrough, the agent-integration pattern, a deterministic graph visualizer, and the M1.6 internal-link deliverable — validated on the author's real 14-post blog corpus (gitignored; bring your own via `wordpress_corpus_prep.py`).
 
 | Milestone | Deliverable | Patterns | UC |
 |-----------|-------------|----------|----|
@@ -52,7 +52,7 @@ The deterministic, in-memory, local-first entity engine. Delivers PRD use cases 
 | **M1.4 Bounded traversal** ✅ | Core-owned BFS (adapters serve 1-hop edges only — storage-agnostic split); depth-2 default, hard max 3; hop-distance discount 1/(1+hop); bitemporal edge filter on **explicit** `as_of` only (no wall-clock reads — determinism); flat depth-0 fallback with `traversal_mode` tag; closed world (unknown seed → empty, dangling targets skipped). Module intent: `packages/cairn-engine/intents/entity_traversal_intent.yaml`. AUTHORING RULE for M1.3 (found via the demo): emit MIRROR edges (concept→post `mentioned_in`) or next-reads are asymmetric (OP-28 reversal-curse mitigation). | OP-34, TH-4, TH-3 | UC-2 |
 | **M1.5 Determinism gate** ✅ | `make check` = ruff + mypy strict + full constraint suite (byte-stability + sockets-disabled tests included); `.github/workflows/ci.yml` runs it on 3.11/3.12/3.13 + demo byte-stability diff. OSS canon shipped: public API (35 curated exports as of Phase 3), `py.typed` (PEP 561), Union-Find merge with transitive whole-class forwarding (surfaces + refs + relations — verified by a resolve→traverse regression test), `from_entities` builders, CONTRIBUTING, CHANGELOG, Makefile. | `deterministic_resolution_no_llm` | UC-7 |
 | **M1.6 First use case: the WordPress entity graph** ✅ | Proven end-to-end on the real 14-post blog (`examples/wordpress_m16_links.py`). Human-approved concept ontology (OP-35 gate) → scan each post body (TF per concept + post-title citations) → freeze to a SQLite `.db` (dogfoods M2.2) → TF-IDF cosine link ranking (`cairn-retrieval`). Emits both surfaces: **(a) mid-content** — a concept mention links to the authority post that covers it most; **(b) next reads** — direct citations (strongest) + TF-IDF-ranked siblings, one primary next step (no CTA wall). Cairn emits recommendations with provenance; WordPress renders them. Corpus stays gitignored — never enters the repo. | OP-34, OP-35 | UC-2 |
-| **→ Release `cairn-engine` 0.1.0** ⏳ | Publish to PyPI; README, quickstart, semver | — | — |
+| **→ Release `cairn-engine` 0.1.0** ✅ | Published to PyPI on 2026-07-18 with `cairn-retrieval` 0.1.0 (see the Phase 3 release row) | — | — |
 
 **Resolves open questions:** OQ-2 (doc_id stability contract), OQ-4 (bi-temporal open-end sentinel — schema decision).
 
@@ -73,7 +73,7 @@ The deterministic, in-memory, local-first entity engine. Delivers PRD use cases 
 
 ---
 
-### Phase 3 — `cairn-retrieval` 0.1: the retrieval layer ✅ **(FEATURE-COMPLETE — M3.0–M3.7; release pending Leo's go)**
+### Phase 3 — `cairn-retrieval` 0.1: the retrieval layer ✅ **(FEATURE-COMPLETE — M3.0–M3.7; released 2026-07-18)**
 
 Built on top of `cairn-engine`. Delivers UC-3, UC-4, UC-5, UC-6.
 

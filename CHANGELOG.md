@@ -19,6 +19,8 @@ Versioning: [SemVer](https://semver.org/) per package.
   stopword set is byte-identical.
 - README: test count is 134; the install line notes that the PyPI package named `cairn`
   is an unrelated project; the examples note names the ComplyEdge examples' requirements.
+- ROADMAP: the 0.1.0 release row is done (published 2026-07-18), the suite count is 134,
+  and the Phase 3 heading says released. `cairn-engine` README: status reads released (0.1.0).
 
 ### Repo hygiene (2026-07-19)
 
