@@ -6,6 +6,12 @@ Versioning: [SemVer](https://semver.org/) per package.
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-11-20
+
+No API or behaviour change from 0.1.1. The `cairn-engine` description and package
+README now lead with what it does: deterministic entity resolution for AI agents,
+where every name maps to the one stored ID, or to "unresolved", with no LLM call.
+
 ## [0.1.1] — 2026-11-20
 
 No API or behaviour change from 0.1.0. CI is green again, and the package

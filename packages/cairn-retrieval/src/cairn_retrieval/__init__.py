@@ -44,7 +44,7 @@ from cairn_retrieval.link_ranking import (
 from cairn_retrieval.retrieve import DocMeta, RetrievalEngine, RetrievalResult
 from cairn_retrieval.semantic import SemanticHit, SemanticIndex
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 __all__ = [
     "DEFAULT_GATE",
