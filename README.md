@@ -26,7 +26,7 @@ A **cairn** is a stack of stones left by travelers, marking the way for those wh
 
 Cairn is a **storage-agnostic routing and composition layer**, not a database. It orchestrates retrieval over stores you already have (files, SQL, vector DB, graph DB). It does **not** own storage, run LLM ingestion on the hot path, or dump an index into the prompt.
 
-**Status:** `cairn-engine` and `cairn-retrieval` are **released on PyPI** (0.1.0) — feature-complete, 134 tests, ruff + mypy strict, zero runtime dependencies, byte-stable output. Next: the benchmark phase (eval vs. agentic-grep / vector-RAG / Graphiti) — quality claims stay honest until it lands. See [`ROADMAP.md`](ROADMAP.md).
+**Status:** `cairn-engine` and `cairn-retrieval` are **released on PyPI** (0.1.1) — feature-complete, 134 tests, ruff + mypy strict, zero runtime dependencies, byte-stable output. Next: the benchmark phase (eval vs. agentic-grep / vector-RAG / Graphiti) — quality claims stay honest until it lands. See [`ROADMAP.md`](ROADMAP.md).
 
 ## Why
 

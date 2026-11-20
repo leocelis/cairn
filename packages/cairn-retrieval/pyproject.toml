@@ -1,6 +1,6 @@
 [project]
 name = "cairn-retrieval"
-version = "0.1.0"
+version = "0.1.1"
 description = "Agent-retrieval layer on top of the Cairn entity engine — adaptive gate, signal orchestration (lexical/semantic/graph), and minimal context assembly. Zero generative-LLM on the hot path."
 readme = "README.md"
 requires-python = ">=3.11"

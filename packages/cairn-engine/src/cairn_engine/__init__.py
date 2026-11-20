@@ -61,7 +61,7 @@ from cairn_engine.entity.resolve import ArbiterFn, ResolverConfig, resolve
 from cairn_engine.entity.semantic import EmbedderFn, EmbeddingIndex, cosine
 from cairn_engine.entity.traverse import TraversalHit, TraversalResult, traverse
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "AliasTableAdapter",

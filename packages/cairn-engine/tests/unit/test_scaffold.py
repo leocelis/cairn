@@ -15,7 +15,7 @@ from cairn_engine.entity.model import Entity, Ref, Relation, ResolvedEntity
 
 
 def test_package_exports_version() -> None:
-    assert cairn_engine.__version__.startswith("0.1.0")
+    assert cairn_engine.__version__.startswith("0.1.")
 
 
 def test_entity_is_immutable_value_record() -> None:
